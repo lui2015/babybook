@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(135deg, #fff7ed 0%, #fef2f2 50%, #f5f3ff 100%);
+  color: #2d2a26;
+  -webkit-font-smoothing: antialiased;
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+/* 翻页动画（旧版，保留兼容） */
+.page-flip-enter {
+  transform: rotateY(-90deg);
+  opacity: 0;
+}
+.page-flip-enter-active {
+  transform: rotateY(0deg);
+  opacity: 1;
+  transition: transform 400ms ease, opacity 400ms ease;
+}
+
+/* ============================================================
+ * 真实翻书动画（模板预览 BookStage / SinglePageStage 使用）
+ *
+ *  bb-flip-next ：下一页，绕左边缘向左翻（0deg → -180deg）
+ *  bb-flip-prev ：上一页，绕右边缘向右翻（0deg → 180deg）
+ *  bb-flip-shade-front / back ：跟随翻动的明暗渐变蒙层，模拟卷纸高光/阴影
+ * ============================================================ */
+@keyframes bb-flip-next {
+  0% {
+    transform: rotateY(0deg);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  40% {
+    box-shadow: -30px 20px 40px -15px rgba(0, 0, 0, 0.35);
+  }
+  100% {
+    transform: rotateY(-180deg);
+    box-shadow: -10px 30px 40px -20px rgba(0, 0, 0, 0.25);
+  }
+}
+
+@keyframes bb-flip-prev {
+  0% {
+    transform: rotateY(0deg);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  40% {
+    box-shadow: 30px 20px 40px -15px rgba(0, 0, 0, 0.35);
+  }
+  100% {
+    transform: rotateY(180deg);
+    box-shadow: 10px 30px 40px -20px rgba(0, 0, 0, 0.25);
+  }
+}
+
+/* 正面的光影：开始较亮，到 50% 时最暗（纸张正卷起来，背光） */
+@keyframes bb-flip-shade-front {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 背面的光影：从暗慢慢变亮（刚露出时暗，翻完后亮） */
+@keyframes bb-flip-shade-back {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/*
+ * 画册详情页翻页进入动画：纯淡入（opacity only）
+ * 严格避免使用 transform/scale/filter/blur —— 这些会让内容"抖一下/糊一下"，
+ * 用户会主观感受为"抖动"。纯 opacity 过渡是视觉上最稳、不跳动的做法。
+ */
+@keyframes bb-page-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 装饰图案 */
+.pattern-dot {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.08) 1px, transparent 1px);
+  background-size: 14px 14px;
+}

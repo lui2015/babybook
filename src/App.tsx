@@ -1,0 +1,28 @@
+import { Routes, Route } from 'react-router-dom';
+import { AppHeader } from './components/AppHeader';
+import { HomePage } from './pages/HomePage';
+import { CreatePage } from './pages/CreatePage';
+import { MyBooksPage } from './pages/MyBooksPage';
+import { BookDetailPage } from './pages/BookDetailPage';
+import { TemplatesPage } from './pages/TemplatesPage';
+import { DraftProvider } from './DraftContext';
+
+export default function App() {
+  return (
+    <DraftProvider>
+      <div className="min-h-screen">
+        <AppHeader />
+        <main>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/templates" element={<TemplatesPage />} />
+            <Route path="/create" element={<CreatePage />} />
+            <Route path="/my" element={<MyBooksPage />} />
+            <Route path="/book/:id" element={<BookDetailPage />} />
+            <Route path="*" element={<HomePage />} />
+          </Routes>
+        </main>
+      </div>
+    </DraftProvider>
+  );
+}
