@@ -1028,11 +1028,13 @@ function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: st
           </div>
           <div className="h-12 w-px" style={{ background: colors.accent }} />
         </div>
-        <div className="flex-1 flex flex-col gap-4 min-w-0">
-          <PhotoFrame photo={photo} template={template} className="flex-1" />
+        <div className="flex-1 flex flex-col gap-4 min-w-0 items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          </div>
           {caption && (
             <div
-              className="text-sm leading-relaxed italic"
+              className="text-sm leading-relaxed italic self-start"
               style={{ fontFamily: fontFamily.title, color: colors.text }}
             >
               "{caption}"
@@ -1153,8 +1155,12 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
 
   if (style === 'minimal') {
     return (
-      <div className="h-full w-full flex p-8 gap-6">
-        <PhotoFrame photo={photo} template={template} className="flex-[3]" />
+      <div className="h-full w-full flex p-8 gap-6 items-center">
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          </div>
+        </div>
         <div className="flex-[2] flex flex-col justify-center">
           <div className="text-[10px] tracking-[0.5em]" style={{ color: colors.accent }}>
             STORY
@@ -1171,7 +1177,16 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex p-6 gap-5 items-center">
-        <PhotoFrame photo={photo} template={template} rotate={-2} className="flex-[3] h-[88%]" />
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame
+              photo={photo}
+              template={template}
+              rotate={-2}
+              className="w-full h-full"
+            />
+          </div>
+        </div>
         <div className="flex-[2] flex flex-col justify-center gap-3">
           <div className="text-xs tracking-widest opacity-70" style={{ fontFamily: fontFamily.title }}>
             NOTE · 01
@@ -1222,7 +1237,11 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
   if (style === 'cartoon') {
     return (
       <div className="h-full w-full flex p-5 gap-4 items-center">
-        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[88%]" />
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          </div>
+        </div>
         <div className="flex-[2] flex flex-col justify-center">
           <div
             className="relative px-4 py-3 text-base leading-relaxed"
@@ -1253,7 +1272,11 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
   if (style === 'festival-cn') {
     return (
       <div className="h-full w-full flex p-5 gap-4 items-center">
-        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[88%]" />
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          </div>
+        </div>
         <div className="flex-[2] flex flex-col items-center justify-center gap-3">
           <div
             className="text-2xl font-bold leading-[1.5] px-2"
@@ -1276,7 +1299,11 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
   if (style === 'festival-xmas') {
     return (
       <div className="h-full w-full flex p-5 gap-4 items-center">
-        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[88%]" />
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          </div>
+        </div>
         <div className="flex-[2] flex flex-col justify-center gap-3 text-center">
           <div className="text-3xl">❄</div>
           <div
@@ -1315,14 +1342,28 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
 function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
 
-  /* vintage：两张微旋错落 */
+  /* vintage：两张 Polaroid 方形微旋错落（1:1 方形，不再竖长条） */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col p-5 gap-3">
         <div className="flex-1 relative">
           <div className="absolute inset-0 flex items-center justify-around">
-            <PhotoFrame photo={photos[0]} template={template} rotate={-3} className="w-[44%] h-[85%]" />
-            <PhotoFrame photo={photos[1]} template={template} rotate={2.5} className="w-[44%] h-[85%]" />
+            <div className="w-[44%]" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame
+                photo={photos[0]}
+                template={template}
+                rotate={-3}
+                className="w-full h-full"
+              />
+            </div>
+            <div className="w-[44%]" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame
+                photo={photos[1]}
+                template={template}
+                rotate={2.5}
+                className="w-full h-full"
+              />
+            </div>
           </div>
         </div>
         {caption && <StyledCaption caption={caption} template={template} />}
@@ -1330,16 +1371,21 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* minimal：主次 7:3（左大右小方图 + 底部细线 + 编号） */
+  /* minimal：主次 7:3（左 4:5 主图 + 右侧 1:1 小图 + 底部细线 + 编号） */
   if (style === 'minimal') {
     return (
       <div className="h-full w-full flex flex-col p-8 gap-4">
-        <div className="flex-1 flex gap-4 min-h-0">
-          <PhotoFrame photo={photos[0]} template={template} className="flex-[7]" />
-          <div className="flex-[3] flex flex-col gap-3 min-w-0">
-            {/* 右侧小图只占一半高度，避免拉成长条 */}
-            <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
-            <div className="text-[10px] tracking-[0.4em] mt-auto" style={{ color: colors.accent }}>
+        <div className="flex-1 flex gap-4 min-h-0 items-center">
+          <div className="flex-[7] flex items-center justify-center">
+            <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+              <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+            </div>
+          </div>
+          <div className="flex-[3] flex flex-col gap-3 min-w-0 items-center justify-center">
+            <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+            </div>
+            <div className="text-[10px] tracking-[0.4em] mt-auto self-start" style={{ color: colors.accent }}>
               01 · 02
             </div>
           </div>
@@ -1410,17 +1456,23 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* festival-cn：一大一小 · 金色竖条分隔 */
+  /* festival-cn：主图 4:5 + 右侧 1:1 副图，金色竖条分隔（消除之前的 0.5:1 超长竖条） */
   if (style === 'festival-cn') {
     return (
-      <div className="h-full w-full flex p-5 gap-3 items-stretch">
-        <PhotoFrame photo={photos[0]} template={template} className="flex-[3] h-[90%] self-center" />
+      <div className="h-full w-full flex p-5 gap-3 items-center">
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+          </div>
+        </div>
         <div
-          className="w-1 my-2"
+          className="w-1 self-stretch my-2"
           style={{ background: `linear-gradient(180deg, ${colors.accent}, transparent)` }}
         />
-        <div className="flex-[2] flex flex-col gap-3 py-4">
-          <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
+        <div className="flex-[2] flex flex-col gap-3 py-4 items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+          </div>
           {caption && (
             <div
               className="text-center text-xs tracking-[0.2em]"
@@ -1434,20 +1486,20 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* festival-xmas：对称倾斜 10° */
+  /* festival-xmas：两张 1:1 方框对称倾斜（消除之前的 0.5:1 竖长条） */
   if (style === 'festival-xmas') {
     return (
       <div className="h-full w-full p-5 relative flex flex-col">
         <div className="flex-1 relative">
           <div
-            className="absolute left-[5%] top-[8%] w-[52%] h-[78%]"
-            style={{ transform: 'rotate(-5deg)' }}
+            className="absolute left-[5%] top-[12%] w-[52%]"
+            style={{ aspectRatio: '1 / 1', transform: 'rotate(-5deg)' }}
           >
             <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
           </div>
           <div
-            className="absolute right-[5%] bottom-[8%] w-[52%] h-[78%]"
-            style={{ transform: 'rotate(5deg)' }}
+            className="absolute right-[5%] bottom-[12%] w-[52%]"
+            style={{ aspectRatio: '1 / 1', transform: 'rotate(5deg)' }}
           >
             <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
           </div>
@@ -1475,44 +1527,67 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
 function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
 
-  /* vintage：三张散摆 */
+  /* vintage：三张 Polaroid 散摆（全部接近方形比例，不变形） */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col p-4 gap-3">
         <div className="flex-1 relative">
-          <PhotoFrame
-            photo={photos[0]}
-            template={template}
-            rotate={-3}
-            className="absolute left-[4%] top-[4%] w-[58%] h-[62%]"
-          />
-          <PhotoFrame
-            photo={photos[1]}
-            template={template}
-            rotate={4}
-            className="absolute right-[4%] top-[8%] w-[40%] h-[46%]"
-          />
-          <PhotoFrame
-            photo={photos[2]}
-            template={template}
-            rotate={-2}
-            className="absolute right-[10%] bottom-[4%] w-[46%] h-[44%]"
-          />
+          <div
+            className="absolute left-[4%] top-[4%] w-[54%]"
+            style={{ aspectRatio: '4 / 5' }}
+          >
+            <PhotoFrame
+              photo={photos[0]}
+              template={template}
+              rotate={-3}
+              className="w-full h-full"
+            />
+          </div>
+          <div
+            className="absolute right-[4%] top-[6%] w-[40%]"
+            style={{ aspectRatio: '1 / 1' }}
+          >
+            <PhotoFrame
+              photo={photos[1]}
+              template={template}
+              rotate={4}
+              className="w-full h-full"
+            />
+          </div>
+          <div
+            className="absolute right-[8%] bottom-[4%] w-[44%]"
+            style={{ aspectRatio: '1 / 1' }}
+          >
+            <PhotoFrame
+              photo={photos[2]}
+              template={template}
+              rotate={-2}
+              className="w-full h-full"
+            />
+          </div>
         </div>
         {caption && <StyledCaption caption={caption} template={template} size="sm" />}
       </div>
     );
   }
 
-  /* minimal：左大 + 右侧两张正方形小图（避免长条） */
+  /* minimal：左 4:5 主图 + 右侧两张 1:1 小图（避免长条） */
   if (style === 'minimal') {
     return (
       <div className="h-full w-full flex flex-col p-8 gap-4">
-        <div className="flex-1 flex gap-4 min-h-0">
-          <PhotoFrame photo={photos[0]} template={template} className="flex-[6]" />
-          <div className="flex-[3] flex flex-col gap-3 min-w-0">
-            <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
-            <PhotoFrame photo={photos[2]} template={template} className="flex-1" />
+        <div className="flex-1 flex gap-4 min-h-0 items-center">
+          <div className="flex-[6] flex items-center justify-center">
+            <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+              <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+            </div>
+          </div>
+          <div className="flex-[3] flex flex-col gap-3 min-w-0 justify-center">
+            <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+            </div>
+            <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -1576,36 +1651,60 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* cartoon：方形主图 + 右侧两个圆角小图 */
+  /* cartoon：左 4:5 主图 + 右侧两张 1:1 方图（不再是 3:5 超长竖条） */
   if (style === 'cartoon') {
     return (
-      <div className="h-full w-full flex flex-col p-5 gap-3">
-        <div className="flex-1 grid grid-cols-5 grid-rows-5 gap-3">
-          <PhotoFrame photo={photos[0]} template={template} className="col-span-3 row-span-5" />
-          <PhotoFrame photo={photos[1]} template={template} className="col-span-2 row-span-2 col-start-4" />
-          <PhotoFrame photo={photos[2]} template={template} className="col-span-2 row-span-2 col-start-4 row-start-3" />
-          <div className="col-span-2 row-span-1 col-start-4 flex items-center justify-center">
-            {caption ? (
-              <StyledCaption caption={caption} template={template} size="sm" />
-            ) : (
-              <div className="text-3xl">{template.decorations[0]}</div>
-            )}
+      <div className="h-full w-full flex p-5 gap-3 items-center">
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame
+              photo={photos[0]}
+              template={template}
+              className="w-full h-full"
+            />
           </div>
+        </div>
+        <div className="flex-[2] flex flex-col gap-3 justify-center">
+          <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame
+              photo={photos[1]}
+              template={template}
+              className="w-full h-full"
+            />
+          </div>
+          <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame
+              photo={photos[2]}
+              template={template}
+              className="w-full h-full"
+            />
+          </div>
+          {caption && (
+            <div className="mt-1">
+              <StyledCaption caption={caption} template={template} size="sm" />
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  /* festival-cn：中间大图 + 上下两张小图 */
+  /* festival-cn：左侧两张 1:1 小图 + 右侧 4:5 主图（替代原先竖条布局） */
   if (style === 'festival-cn') {
     return (
-      <div className="h-full w-full flex p-5 gap-3">
-        <div className="flex-[2] flex flex-col gap-3 py-3">
-          <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
-          <PhotoFrame photo={photos[2]} template={template} className="flex-1" />
+      <div className="h-full w-full flex p-5 gap-3 items-center">
+        <div className="flex-[2] flex flex-col gap-3 items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+          </div>
+          <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+          </div>
         </div>
-        <div className="flex-[3] flex flex-col justify-center gap-3">
-          <PhotoFrame photo={photos[0]} template={template} className="flex-1" />
+        <div className="flex-[3] flex flex-col items-center justify-center gap-3">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+          </div>
           {caption && (
             <div
               className="text-center text-xs tracking-[0.3em]"
@@ -1619,25 +1718,25 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* festival-xmas：阶梯错落 */
+  /* festival-xmas：三张阶梯错落（全部 4:5/1:1 接近方形，不再长条） */
   if (style === 'festival-xmas') {
     return (
       <div className="h-full w-full p-5 relative">
         <div
-          className="absolute left-[4%] top-[6%] w-[48%] h-[54%]"
-          style={{ transform: 'rotate(-4deg)' }}
+          className="absolute left-[4%] top-[4%] w-[48%]"
+          style={{ aspectRatio: '4 / 5', transform: 'rotate(-4deg)' }}
         >
           <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
         </div>
         <div
-          className="absolute right-[4%] top-[20%] w-[44%] h-[46%]"
-          style={{ transform: 'rotate(3deg)' }}
+          className="absolute right-[4%] top-[14%] w-[44%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(3deg)' }}
         >
           <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
         </div>
         <div
-          className="absolute left-[22%] bottom-[8%] w-[50%] h-[38%]"
-          style={{ transform: 'rotate(-2deg)' }}
+          className="absolute left-[24%] bottom-[4%] w-[50%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(-2deg)' }}
         >
           <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
         </div>
@@ -1668,18 +1767,25 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
 function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
 
-  /* vintage：散摆 2×2 */
+  /* vintage：四张 Polaroid 2×2 散摆（每张 1:1 方形，不变形） */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col p-4 gap-3">
-        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3">
+        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3 content-center">
           {photos.slice(0, 4).map((p, i) => (
-            <PhotoFrame
+            <div
               key={p.id}
-              photo={p}
-              template={template}
-              rotate={[-2, 1.5, 2, -1.5][i] ?? 0}
-            />
+              className="flex items-center justify-center"
+            >
+              <div className="w-[92%]" style={{ aspectRatio: '1 / 1' }}>
+                <PhotoFrame
+                  photo={p}
+                  template={template}
+                  rotate={[-2, 1.5, 2, -1.5][i] ?? 0}
+                  className="w-full h-full"
+                />
+              </div>
+            </div>
           ))}
         </div>
         {caption && <StyledCaption caption={caption} template={template} size="sm" />}
@@ -1687,14 +1793,16 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
     );
   }
 
-  /* minimal：严格 2×2 + 每张编号 01/02/03/04 */
+  /* minimal：严格 2×2 + 每张编号 01/02/03/04（四张 1:1 方形） */
   if (style === 'minimal') {
     return (
       <div className="h-full w-full flex flex-col p-8 gap-4">
-        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-5">
+        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-5 content-center">
           {photos.slice(0, 4).map((p, i) => (
-            <div key={p.id} className="relative">
-              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+            <div key={p.id} className="relative flex items-center justify-center">
+              <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+                <PhotoFrame photo={p} template={template} className="w-full h-full" />
+              </div>
               <div
                 className="absolute -top-3 -left-1 text-[10px] tracking-[0.3em] px-1"
                 style={{ background: colors.paper, color: colors.accent }}
@@ -1749,29 +1857,44 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
     );
   }
 
-  /* cartoon：蜂窝 1 大 3 小交错 */
+  /* cartoon：四张 1:1 方框 2×2（消除之前的 2:1/1:2 长条） */
   if (style === 'cartoon') {
     return (
       <div className="h-full w-full flex flex-col p-5 gap-3">
-        <div className="flex-1 grid grid-cols-3 grid-rows-3 gap-3">
-          <PhotoFrame photo={photos[0]} template={template} className="col-span-2 row-span-2" />
-          <PhotoFrame photo={photos[1]} template={template} className="col-span-1 row-span-1 col-start-3" />
-          <PhotoFrame photo={photos[2]} template={template} className="col-span-1 row-span-2 col-start-3 row-start-2" />
-          <PhotoFrame photo={photos[3]} template={template} className="col-span-2 row-span-1 row-start-3" />
+        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3 content-center">
+          {photos.slice(0, 4).map((p) => (
+            <div key={p.id} className="flex items-center justify-center">
+              <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+                <PhotoFrame
+                  photo={p}
+                  template={template}
+                  className="w-full h-full"
+                />
+              </div>
+            </div>
+          ))}
         </div>
         {caption && <StyledCaption caption={caption} template={template} size="sm" />}
       </div>
     );
   }
 
-  /* festival-cn：中心对称四宫格（像窗花） */
+  /* festival-cn：中心对称四宫格（每格 1:1 方形，像窗花） */
   if (style === 'festival-cn') {
     return (
       <div className="h-full w-full flex flex-col p-5 gap-3">
         <div className="flex-1 relative">
-          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-4">
+          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-4 content-center">
             {photos.slice(0, 4).map((p) => (
-              <PhotoFrame key={p.id} photo={p} template={template} />
+              <div key={p.id} className="flex items-center justify-center">
+                <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+                  <PhotoFrame
+                    photo={p}
+                    template={template}
+                    className="w-full h-full"
+                  />
+                </div>
+              </div>
             ))}
           </div>
           {/* 中央金色印章 */}
@@ -1799,18 +1922,23 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
     );
   }
 
-  /* festival-xmas：对角线斜排 */
+  /* festival-xmas：对角线斜排（四张 1:1 方形） */
   if (style === 'festival-xmas') {
+    const tiles: Array<{ cls: string; r: number }> = [
+      { cls: 'absolute left-[3%] top-[4%] w-[44%]', r: -3 },
+      { cls: 'absolute right-[3%] top-[12%] w-[44%]', r: 4 },
+      { cls: 'absolute left-[10%] bottom-[10%] w-[44%]', r: -4 },
+      { cls: 'absolute right-[3%] bottom-[4%] w-[44%]', r: 3 },
+    ];
     return (
       <div className="h-full w-full p-5 relative">
-        {[
-          { cls: 'absolute left-[3%] top-[3%] w-[44%] h-[44%]', r: -3 },
-          { cls: 'absolute right-[3%] top-[10%] w-[44%] h-[44%]', r: 4 },
-          { cls: 'absolute left-[10%] bottom-[10%] w-[44%] h-[44%]', r: -4 },
-          { cls: 'absolute right-[3%] bottom-[3%] w-[44%] h-[44%]', r: 3 },
-        ].map((cfg, i) =>
+        {tiles.map((cfg, i) =>
           photos[i] ? (
-            <div key={photos[i].id} className={cfg.cls} style={{ transform: `rotate(${cfg.r}deg)` }}>
+            <div
+              key={photos[i].id}
+              className={cfg.cls}
+              style={{ aspectRatio: '1 / 1', transform: `rotate(${cfg.r}deg)` }}
+            >
               <PhotoFrame photo={photos[i]} template={template} className="w-full h-full" />
             </div>
           ) : null,
