@@ -5,6 +5,8 @@ import html2canvas from 'html2canvas';
 import { getBook, saveBook, deleteBook } from '../storage';
 import { getTemplateById } from '../templates';
 import { PageView } from '../components/PageView';
+import { BookFlip } from '../components/BookFlip';
+import { exportBookToPdf } from '../exportPdf';
 import type { Book } from '../types';
 
 export function BookDetailPage() {
@@ -13,6 +15,7 @@ export function BookDetailPage() {
   const [book, setBook] = useState<Book | null>(null);
   const [index, setIndex] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [exportHint, setExportHint] = useState<string | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,14 +33,11 @@ export function BookDetailPage() {
   // 画册加载后：一次性对全量图片发起 decode，保证任何页的图片都已解码就位
   useEffect(() => {
     if (!book) return;
-    const urls = Array.from(
-      new Set(book.photos.map((p) => p.src).filter(Boolean)),
-    );
+    const urls = Array.from(new Set(book.photos.map((p) => p.src).filter(Boolean)));
     urls.forEach((src) => {
       const img = new Image();
       img.decoding = 'async';
       img.src = src;
-      // 主动解码（若失败静默忽略）
       if (img.decode) img.decode().catch(() => {});
     });
   }, [book]);
@@ -51,10 +51,6 @@ export function BookDetailPage() {
   }
 
   const total = book.pages.length;
-
-  function go(delta: number) {
-    setIndex((i) => Math.max(0, Math.min(total - 1, i + delta)));
-  }
 
   async function renameBook() {
     const t = prompt('重命名画册', book!.title);
@@ -72,9 +68,10 @@ export function BookDetailPage() {
 
   async function exportCurrentPage() {
     if (!pageRef.current) return;
-    // 只截取当前激活的那一页（pageRef 内有多页预渲染）
-    const target = pageRef.current.querySelector<HTMLElement>('[data-active="true"]') ?? pageRef.current;
+    const target =
+      pageRef.current.querySelector<HTMLElement>('[data-active="true"]') ?? pageRef.current;
     setExporting(true);
+    setExportHint('正在截取当前页…');
     try {
       const canvas = await html2canvas(target, {
         backgroundColor: null,
@@ -85,13 +82,14 @@ export function BookDetailPage() {
       downloadDataUrl(url, `${book!.title}-第${index + 1}页.png`);
     } finally {
       setExporting(false);
+      setExportHint(null);
     }
   }
 
   async function exportLongImage() {
     setExporting(true);
+    setExportHint('正在合成长图…');
     try {
-      // 临时渲染所有页
       const container = document.createElement('div');
       container.style.position = 'fixed';
       container.style.left = '-99999px';
@@ -107,7 +105,6 @@ export function BookDetailPage() {
       root.style.background = template!.colors.bg;
       container.appendChild(root);
 
-      // 使用 React 动态渲染每一页
       const pagesEl: HTMLElement[] = [];
       book!.pages.forEach((p) => {
         const el = document.createElement('div');
@@ -127,7 +124,6 @@ export function BookDetailPage() {
         pagesEl.push(el);
       });
 
-      // 等图片/字体加载
       await new Promise((r) => setTimeout(r, 800));
       const canvas = await html2canvas(root, {
         backgroundColor: template!.colors.bg,
@@ -142,7 +138,32 @@ export function BookDetailPage() {
       alert('导出失败，请重试');
     } finally {
       setExporting(false);
+      setExportHint(null);
     }
+  }
+
+  async function exportPdf() {
+    setExporting(true);
+    setExportHint(`正在生成 PDF（0/${total}）…`);
+    try {
+      await exportBookToPdf(book!, template!, (done, t) => {
+        setExportHint(`正在生成 PDF（${done}/${t}）…`);
+      });
+    } catch (e) {
+      console.error(e);
+      alert('PDF 生成失败，请重试');
+    } finally {
+      setExporting(false);
+      setExportHint(null);
+    }
+  }
+
+  function printBook() {
+    // 触发浏览器打印。打印样式在下方 <style> 里定义：
+    //  - 隐藏工具栏/箭头/缩略图等 UI，只保留画册页；
+    //  - 每页一页 A4，自动分页；
+    //  - 画册页按 3:4 等比填满 A4 版心居中。
+    window.print();
   }
 
   function shareBook() {
@@ -156,9 +177,12 @@ export function BookDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-4 py-6 book-detail-root">
+      {/* 打印专用样式（仅打印时生效） */}
+      <style>{PRINT_CSS}</style>
+
       {/* 工具栏 */}
-      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap no-print">
         <div>
           <h1 className="font-display text-2xl font-bold">{book.title}</h1>
           <div className="text-xs text-neutral-500">
@@ -169,10 +193,16 @@ export function BookDetailPage() {
           <ToolBtn onClick={renameBook}>重命名</ToolBtn>
           <ToolBtn onClick={shareBook}>分享</ToolBtn>
           <ToolBtn onClick={exportCurrentPage} disabled={exporting}>
-            {exporting ? '导出中…' : '保存当前页'}
+            保存当前页
           </ToolBtn>
           <ToolBtn onClick={exportLongImage} disabled={exporting}>
             导出长图
+          </ToolBtn>
+          <ToolBtn onClick={exportPdf} disabled={exporting} primary>
+            下载 PDF
+          </ToolBtn>
+          <ToolBtn onClick={printBook} disabled={exporting}>
+            打印
           </ToolBtn>
           <ToolBtn onClick={removeBook} danger>
             删除
@@ -180,73 +210,30 @@ export function BookDetailPage() {
         </div>
       </div>
 
-      {/* 主视图 */}
-      <div
-        className="rounded-3xl p-6 sm:p-10 flex items-center justify-center min-h-[60vh]"
-        style={{ background: template.colors.bg }}
-      >
-        <div className="flex items-center gap-4 w-full">
-          <NavArrow onClick={() => go(-1)} disabled={index === 0} dir="left" />
-          <div className="flex-1 max-w-md mx-auto" ref={pageRef}>
-            {/*
-              全量堆叠预渲染：
-              - 所有页一开始就挂载，并保持在屏内同一位置叠放。
-              - 非当前页 opacity:0（仅当前页 opacity:1），切换时用纯 opacity 过渡
-                （无 scale / blur / translate，避免"跳动"错觉）。
-              - 由于所有页都以主视图的大尺寸存在于 DOM 中，浏览器在首次布局时
-                就会按大尺寸对图片完成 decode + 光栅化，翻页切换只是改 opacity，
-                合成器直接拿现成位图上屏，视觉上稳定、不抖动。
-              - 注意不使用 overflow:hidden（避免 containment 优化）。
-            */}
-            <div className="relative aspect-[3/4] w-full">
-              {book.pages.map((p, i) => {
-                const isActive = i === index;
-                return (
-                  <div
-                    key={p.id}
-                    data-active={isActive ? 'true' : 'false'}
-                    aria-hidden={!isActive}
-                    className="absolute inset-0"
-                    style={{
-                      opacity: isActive ? 1 : 0,
-                      transition: 'opacity 260ms ease-out',
-                      pointerEvents: isActive ? 'auto' : 'none',
-                      zIndex: isActive ? 2 : 1,
-                      // 关键：即使 opacity:0，也保留在布局中，图片已按大尺寸解码
-                    }}
-                  >
-                    <PageView
-                      page={p}
-                      photos={book.photos}
-                      template={template}
-                      babyName={book.babyName}
-                      dateRange={book.dateRange}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <NavArrow onClick={() => go(1)} disabled={index === total - 1} dir="right" />
+      {/* 导出进度提示 */}
+      {exportHint && (
+        <div className="mb-4 text-sm text-rose bg-rose/10 border border-rose/30 rounded-xl px-4 py-2 no-print">
+          {exportHint}
         </div>
+      )}
+
+      {/* 主视图（使用共用翻页组件） */}
+      <div className="no-print">
+        <BookFlip
+          book={book}
+          template={template}
+          index={index}
+          onIndexChange={setIndex}
+          stageRef={pageRef}
+          minStageHeight="60vh"
+        />
       </div>
 
-      {/* 页码 */}
-      <div className="text-center mt-3 text-sm text-neutral-600">
-        {index + 1} / {total}
-      </div>
-
-      {/* 缩略图条 */}
-      <div className="mt-4 overflow-x-auto scrollbar-hide">
-        <div className="flex gap-2 pb-2">
-          {book.pages.map((p, i) => (
-            <button
-              key={p.id}
-              onClick={() => setIndex(i)}
-              className={`flex-shrink-0 w-16 aspect-[3/4] rounded overflow-hidden border-2 transition ${
-                i === index ? 'border-rose scale-105' : 'border-transparent opacity-70'
-              }`}
-            >
+      {/* 打印专用：所有页顺序平铺（每页一页 A4） */}
+      <div className="print-only">
+        {book.pages.map((p) => (
+          <div key={p.id} className="print-page">
+            <div className="print-page-inner">
               <PageView
                 page={p}
                 photos={book.photos}
@@ -254,9 +241,9 @@ export function BookDetailPage() {
                 babyName={book.babyName}
                 dateRange={book.dateRange}
               />
-            </button>
-          ))}
-        </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -267,43 +254,26 @@ function ToolBtn({
   onClick,
   disabled,
   danger,
+  primary,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
   danger?: boolean;
+  primary?: boolean;
 }) {
+  const cls = primary
+    ? 'border-rose bg-rose text-white hover:brightness-105'
+    : danger
+      ? 'border-rose/30 text-rose hover:bg-rose/5'
+      : 'border-neutral-200 text-neutral-700 hover:border-neutral-400 bg-white';
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-3 py-1.5 rounded-full text-sm border transition ${
-        danger
-          ? 'border-rose/30 text-rose hover:bg-rose/5'
-          : 'border-neutral-200 text-neutral-700 hover:border-neutral-400 bg-white'
-      } disabled:opacity-40`}
+      className={`px-3 py-1.5 rounded-full text-sm border transition ${cls} disabled:opacity-40`}
     >
       {children}
-    </button>
-  );
-}
-
-function NavArrow({
-  onClick,
-  disabled,
-  dir,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  dir: 'left' | 'right';
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="w-10 h-10 rounded-full bg-white/70 backdrop-blur border border-white hover:bg-white disabled:opacity-30 transition flex-shrink-0 text-xl"
-    >
-      {dir === 'left' ? '‹' : '›'}
     </button>
   );
 }
@@ -319,3 +289,37 @@ function formatDate(ts: number) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+/**
+ * 打印样式：
+ *  - 默认屏幕下 .print-only 隐藏；.no-print 显示。
+ *  - @media print 下反过来：.no-print 隐藏，.print-only 按 A4 纵向每页一页输出。
+ *  - 每一页画册按 3:4 等比填满 A4 版心（去除浏览器默认页边，交由打印机/用户在浏览器打印对话框设置）。
+ */
+const PRINT_CSS = `
+.print-only { display: none; }
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  html, body { background: #fff !important; }
+  .no-print { display: none !important; }
+  .book-detail-root { max-width: none !important; padding: 0 !important; margin: 0 !important; }
+  .print-only { display: block; }
+  .print-page {
+    width: 210mm;
+    height: 297mm;
+    page-break-after: always;
+    break-after: page;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #fff;
+  }
+  .print-page:last-child { page-break-after: auto; break-after: auto; }
+  .print-page-inner {
+    /* A4 纵向版心：宽 186mm 时高 248mm (3:4)，两边各留 12mm，上下 24.5mm */
+    width: 186mm;
+    height: 248mm;
+  }
+}
+`;

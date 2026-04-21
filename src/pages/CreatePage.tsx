@@ -5,7 +5,7 @@ import { filesToPhotos } from '../imageUtils';
 import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplateById } from '../templates';
 import { generatePages } from '../layoutEngine';
 import { saveBook } from '../storage';
-import { PageView } from '../components/PageView';
+import { BookFlip } from '../components/BookFlip';
 import type { Book } from '../types';
 
 type Step = 'upload' | 'info' | 'template' | 'generate';
@@ -361,6 +361,7 @@ function StepGenerate({
   const { photos, babyName, dateRange, templateId } = useDraft();
   const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<Book | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
 
   // 模拟进度 + 生成画册
   useEffect(() => {
@@ -415,11 +416,11 @@ function StepGenerate({
   const tpl = getTemplateById(preview.templateId)!;
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <div className="font-display text-2xl font-bold">画册已生成 🎉</div>
           <div className="text-sm text-neutral-600">
-            共 {preview.pages.length} 页 · 模板 {tpl.name}
+            共 {preview.pages.length} 页 · 模板 {tpl.name} · 左右箭头 / 键盘 ← → 翻页
           </div>
         </div>
         <div className="flex gap-2">
@@ -434,24 +435,18 @@ function StepGenerate({
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {preview.pages.slice(0, 8).map((p) => (
-          <div key={p.id} className="aspect-[3/4]">
-            <PageView
-              page={p}
-              photos={preview.photos}
-              template={tpl}
-              babyName={preview.babyName}
-              dateRange={preview.dateRange}
-            />
-          </div>
-        ))}
+
+      <BookFlip
+        book={preview}
+        template={tpl}
+        index={pageIndex}
+        onIndexChange={setPageIndex}
+        minStageHeight="56vh"
+      />
+
+      <div className="text-center text-xs text-neutral-500">
+        预览模式 · 保存后可在「我的画册」里继续翻阅，并支持下载 PDF / 打印
       </div>
-      {preview.pages.length > 8 && (
-        <div className="text-center text-xs text-neutral-500">
-          展示前 8 页预览，点击"保存并查看"浏览全部 {preview.pages.length} 页
-        </div>
-      )}
     </div>
   );
 }
