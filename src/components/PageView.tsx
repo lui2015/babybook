@@ -985,11 +985,12 @@ function CoverLayout({
 }
 
 /* ============================================================
- *  版式 2：单图大图
+ *  版式 2：单图大图 —— 每 style 骨架不同（不只有相框差异）
  * ============================================================ */
 function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: string; template: Template }) {
-  const { style } = template;
+  const { style, colors, fontFamily } = template;
 
+  /* vintage：Polaroid 居中微旋 */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center p-6 gap-4">
@@ -999,25 +1000,122 @@ function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: st
     );
   }
 
+  /* minimal：左留白 + 右大图（杂志版心）+ 侧边竖排章节号 */
   if (style === 'minimal') {
     return (
-      <div className="h-full w-full flex flex-col p-8 gap-4">
-        <div className="text-[10px] tracking-[0.4em]" style={{ color: template.colors.accent }}>
-          — MOMENT —
+      <div className="h-full w-full flex p-8 gap-6">
+        {/* 左列：竖排章节号 */}
+        <div className="flex flex-col justify-between py-2 shrink-0">
+          <div
+            className="text-[10px] tracking-[0.5em]"
+            style={{ color: colors.accent, writingMode: 'vertical-rl' }}
+          >
+            MOMENT · 01
+          </div>
+          <div className="h-12 w-px" style={{ background: colors.accent }} />
         </div>
-        <PhotoFrame photo={photo} template={template} className="flex-1" />
+        <div className="flex-1 flex flex-col gap-4 min-w-0">
+          <PhotoFrame photo={photo} template={template} className="flex-1" />
+          {caption && (
+            <div
+              className="text-sm leading-relaxed italic"
+              style={{ fontFamily: fontFamily.title, color: colors.text }}
+            >
+              "{caption}"
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* watercolor：照片圆角 + 右下角重叠手写贴纸（撕边感） */
+  if (style === 'watercolor') {
+    return (
+      <div className="h-full w-full p-6 relative">
+        <PhotoFrame photo={photo} template={template} className="w-full h-full" />
         {caption && (
           <div
-            className="text-sm leading-relaxed italic max-w-[80%]"
-            style={{ fontFamily: template.fontFamily.title }}
+            className="absolute bottom-4 right-4 max-w-[70%] px-4 py-2 text-sm shadow-md"
+            style={{
+              background: colors.paper,
+              color: colors.text,
+              fontFamily: fontFamily.title,
+              transform: 'rotate(-2deg)',
+              border: `1px dashed ${colors.primary}55`,
+            }}
           >
-            "{caption}"
+            {caption}
           </div>
         )}
       </div>
     );
   }
 
+  /* cartoon：满版大图 + 上方气泡从照片里"飘出来" */
+  if (style === 'cartoon') {
+    return (
+      <div className="h-full w-full p-5 flex flex-col gap-3">
+        <div className="relative flex-1">
+          <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          {caption && (
+            <div className="absolute -top-2 right-5 max-w-[70%]">
+              <StyledCaption caption={caption} template={template} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* festival-cn：主图上叠金色竖排书签 */
+  if (style === 'festival-cn') {
+    return (
+      <div className="h-full w-full p-5 relative">
+        <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+        {caption && (
+          <div
+            className="absolute top-8 right-7 px-2 py-4 text-sm tracking-[0.3em]"
+            style={{
+              writingMode: 'vertical-rl',
+              background: colors.primary,
+              color: colors.paper,
+              fontFamily: fontFamily.title,
+              boxShadow: `2px 2px 0 ${colors.accent}`,
+            }}
+          >
+            {caption}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* festival-xmas：主图 + 底部金红绶带 */
+  if (style === 'festival-xmas') {
+    return (
+      <div className="h-full w-full p-5 flex flex-col gap-3">
+        <PhotoFrame photo={photo} template={template} className="flex-1" />
+        {caption && (
+          <div
+            className="mx-auto px-6 py-1.5 text-sm -mt-8 relative"
+            style={{
+              background: colors.paper,
+              color: colors.primary,
+              fontFamily: fontFamily.title,
+              border: `2px solid ${colors.accent}`,
+              transform: 'rotate(-1deg)',
+              boxShadow: `0 2px 0 ${colors.primary}`,
+            }}
+          >
+            ❄ {caption} ❄
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 默认
   return (
     <div className="h-full w-full flex flex-col p-5 gap-3">
       <PhotoFrame photo={photo} template={template} className="flex-1" />
@@ -1027,7 +1125,7 @@ function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: st
 }
 
 /* ============================================================
- *  版式 3：单竖图 —— 左图 + 右文
+ *  版式 3：单竖图 —— 左图 + 右文，各 style 独立骨架
  * ============================================================ */
 function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
@@ -1065,6 +1163,104 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
     );
   }
 
+  if (style === 'watercolor') {
+    return (
+      <div className="h-full w-full flex p-5 gap-4 items-center">
+        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[86%]" />
+        <div className="flex-[2] flex flex-col justify-center gap-3 relative">
+          <div
+            className="text-3xl opacity-70 -mb-2"
+            style={{ color: colors.accent, fontFamily: fontFamily.title }}
+          >
+            "
+          </div>
+          <div
+            className="text-base leading-relaxed"
+            style={{ color: colors.text, fontFamily: fontFamily.title }}
+          >
+            {caption ?? '这一刻，值得被珍藏。'}
+          </div>
+          <div
+            className="h-0.5 w-10 mt-2 rounded-full"
+            style={{ background: colors.primary, opacity: 0.5 }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (style === 'cartoon') {
+    return (
+      <div className="h-full w-full flex p-5 gap-4 items-center">
+        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[88%]" />
+        <div className="flex-[2] flex flex-col justify-center">
+          <div
+            className="relative px-4 py-3 text-base leading-relaxed"
+            style={{
+              background: colors.paper,
+              border: `3px solid ${colors.primary}`,
+              borderRadius: '18px',
+              fontFamily: fontFamily.title,
+              color: colors.text,
+              boxShadow: `0 3px 0 ${colors.accent}`,
+            }}
+          >
+            {caption ?? '讲一个好玩的小故事～'}
+            <span
+              className="absolute -left-2 top-6 w-0 h-0"
+              style={{
+                borderTop: '7px solid transparent',
+                borderBottom: '7px solid transparent',
+                borderRight: `8px solid ${colors.primary}`,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (style === 'festival-cn') {
+    return (
+      <div className="h-full w-full flex p-5 gap-4 items-center">
+        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[88%]" />
+        <div className="flex-[2] flex flex-col items-center justify-center gap-3">
+          <div
+            className="text-2xl font-bold leading-[1.5] px-2"
+            style={{
+              writingMode: 'vertical-rl',
+              color: colors.primary,
+              fontFamily: fontFamily.title,
+              borderLeft: `2px solid ${colors.accent}`,
+              borderRight: `2px solid ${colors.accent}`,
+              padding: '8px 6px',
+            }}
+          >
+            {caption ?? '时光慢慢'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (style === 'festival-xmas') {
+    return (
+      <div className="h-full w-full flex p-5 gap-4 items-center">
+        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[88%]" />
+        <div className="flex-[2] flex flex-col justify-center gap-3 text-center">
+          <div className="text-3xl">❄</div>
+          <div
+            className="text-base italic leading-relaxed"
+            style={{ color: colors.primary, fontFamily: fontFamily.title }}
+          >
+            {caption ?? '愿你的童年，像下雪的夜晚一样温柔。'}
+          </div>
+          <div className="text-3xl">🎄</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full w-full flex p-5 gap-4 items-center">
       <PhotoFrame photo={photo} template={template} className="flex-[3] h-[85%]" />
@@ -1084,12 +1280,12 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
 }
 
 /* ============================================================
- *  版式 4：双图并排
+ *  版式 4：双图并排 —— 每 style 差异化排版，不再等分长条
  * ============================================================ */
 function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
-  const { style } = template;
+  const { style, colors, fontFamily } = template;
 
-  // vintage: 两张都微旋转，错落摆放
+  /* vintage：两张微旋错落 */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col p-5 gap-3">
@@ -1097,6 +1293,124 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
           <div className="absolute inset-0 flex items-center justify-around">
             <PhotoFrame photo={photos[0]} template={template} rotate={-3} className="w-[44%] h-[85%]" />
             <PhotoFrame photo={photos[1]} template={template} rotate={2.5} className="w-[44%] h-[85%]" />
+          </div>
+        </div>
+        {caption && <StyledCaption caption={caption} template={template} />}
+      </div>
+    );
+  }
+
+  /* minimal：主次 7:3（左大右小方图 + 底部细线 + 编号） */
+  if (style === 'minimal') {
+    return (
+      <div className="h-full w-full flex flex-col p-8 gap-4">
+        <div className="flex-1 flex gap-4 min-h-0">
+          <PhotoFrame photo={photos[0]} template={template} className="flex-[7]" />
+          <div className="flex-[3] flex flex-col gap-3 min-w-0">
+            {/* 右侧小图只占一半高度，避免拉成长条 */}
+            <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
+            <div className="text-[10px] tracking-[0.4em] mt-auto" style={{ color: colors.accent }}>
+              01 · 02
+            </div>
+          </div>
+        </div>
+        {caption && (
+          <div
+            className="text-sm italic leading-relaxed"
+            style={{ fontFamily: fontFamily.title, color: colors.text }}
+          >
+            "{caption}"
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* watercolor：上下错落 + 大小不同（第二张微旋重叠一角） */
+  if (style === 'watercolor') {
+    return (
+      <div className="h-full w-full p-5 relative">
+        <PhotoFrame
+          photo={photos[0]}
+          template={template}
+          className="absolute left-[6%] top-[8%] w-[62%] h-[58%]"
+        />
+        <div
+          className="absolute right-[6%] bottom-[14%] w-[52%] h-[48%]"
+          style={{ transform: 'rotate(3deg)' }}
+        >
+          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div
+            className="absolute bottom-3 left-6 right-6 text-center"
+          >
+            <StyledCaption caption={caption} template={template} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* cartoon：左大方图 + 右侧两块（上圆 + 下方块）不等高 */
+  if (style === 'cartoon') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="flex-1 grid grid-cols-5 grid-rows-3 gap-3">
+          <PhotoFrame photo={photos[0]} template={template} className="col-span-3 row-span-3" />
+          <PhotoFrame photo={photos[1]} template={template} className="col-span-2 row-span-2 col-start-4" />
+          <div className="col-span-2 row-span-1 col-start-4 flex items-center justify-center">
+            {caption ? (
+              <StyledCaption caption={caption} template={template} size="sm" />
+            ) : (
+              <div className="text-4xl">{template.decorations[0]}</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* festival-cn：一大一小 · 金色竖条分隔 */
+  if (style === 'festival-cn') {
+    return (
+      <div className="h-full w-full flex p-5 gap-3 items-stretch">
+        <PhotoFrame photo={photos[0]} template={template} className="flex-[3] h-[90%] self-center" />
+        <div
+          className="w-1 my-2"
+          style={{ background: `linear-gradient(180deg, ${colors.accent}, transparent)` }}
+        />
+        <div className="flex-[2] flex flex-col gap-3 py-4">
+          <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
+          {caption && (
+            <div
+              className="text-center text-xs tracking-[0.2em]"
+              style={{ color: colors.primary, fontFamily: fontFamily.title }}
+            >
+              — {caption} —
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* festival-xmas：对称倾斜 10° */
+  if (style === 'festival-xmas') {
+    return (
+      <div className="h-full w-full p-5 relative flex flex-col">
+        <div className="flex-1 relative">
+          <div
+            className="absolute left-[5%] top-[8%] w-[52%] h-[78%]"
+            style={{ transform: 'rotate(-5deg)' }}
+          >
+            <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+          </div>
+          <div
+            className="absolute right-[5%] bottom-[8%] w-[52%] h-[78%]"
+            style={{ transform: 'rotate(5deg)' }}
+          >
+            <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
           </div>
         </div>
         {caption && <StyledCaption caption={caption} template={template} />}
@@ -1117,11 +1431,12 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
 }
 
 /* ============================================================
- *  版式 5：三图拼贴
+ *  版式 5：三图拼贴 —— 每 style 独立骨架
  * ============================================================ */
 function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
-  const { style } = template;
+  const { style, colors, fontFamily } = template;
 
+  /* vintage：三张散摆 */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col p-4 gap-3">
@@ -1150,6 +1465,136 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
+  /* minimal：左大 + 右侧两张正方形小图（避免长条） */
+  if (style === 'minimal') {
+    return (
+      <div className="h-full w-full flex flex-col p-8 gap-4">
+        <div className="flex-1 flex gap-4 min-h-0">
+          <PhotoFrame photo={photos[0]} template={template} className="flex-[6]" />
+          <div className="flex-[3] flex flex-col gap-3 min-w-0">
+            <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
+            <PhotoFrame photo={photos[2]} template={template} className="flex-1" />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-[10px] tracking-[0.4em]" style={{ color: colors.accent }}>
+            01 · 02 · 03
+          </div>
+          <div className="flex-1 h-px" style={{ background: `${colors.accent}66` }} />
+          {caption && (
+            <span className="text-xs italic" style={{ fontFamily: fontFamily.title }}>
+              {caption}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* watercolor：大图居左，右侧两张圆润重叠错位 */
+  if (style === 'watercolor') {
+    return (
+      <div className="h-full w-full p-5 relative">
+        <PhotoFrame
+          photo={photos[0]}
+          template={template}
+          className="absolute left-[5%] top-[5%] w-[58%] h-[72%]"
+        />
+        <div
+          className="absolute right-[4%] top-[8%] w-[42%] h-[42%]"
+          style={{ transform: 'rotate(3deg)' }}
+        >
+          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-[10%] bottom-[6%] w-[44%] h-[40%]"
+          style={{ transform: 'rotate(-4deg)' }}
+        >
+          <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div className="absolute bottom-2 left-4">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* cartoon：方形主图 + 右侧两个圆角小图 */
+  if (style === 'cartoon') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="flex-1 grid grid-cols-5 grid-rows-5 gap-3">
+          <PhotoFrame photo={photos[0]} template={template} className="col-span-3 row-span-5" />
+          <PhotoFrame photo={photos[1]} template={template} className="col-span-2 row-span-2 col-start-4" />
+          <PhotoFrame photo={photos[2]} template={template} className="col-span-2 row-span-2 col-start-4 row-start-3" />
+          <div className="col-span-2 row-span-1 col-start-4 flex items-center justify-center">
+            {caption ? (
+              <StyledCaption caption={caption} template={template} size="sm" />
+            ) : (
+              <div className="text-3xl">{template.decorations[0]}</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* festival-cn：中间大图 + 上下两张小图 */
+  if (style === 'festival-cn') {
+    return (
+      <div className="h-full w-full flex p-5 gap-3">
+        <div className="flex-[2] flex flex-col gap-3 py-3">
+          <PhotoFrame photo={photos[1]} template={template} className="flex-1" />
+          <PhotoFrame photo={photos[2]} template={template} className="flex-1" />
+        </div>
+        <div className="flex-[3] flex flex-col justify-center gap-3">
+          <PhotoFrame photo={photos[0]} template={template} className="flex-1" />
+          {caption && (
+            <div
+              className="text-center text-xs tracking-[0.3em]"
+              style={{ color: colors.primary, fontFamily: fontFamily.title }}
+            >
+              — {caption} —
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* festival-xmas：阶梯错落 */
+  if (style === 'festival-xmas') {
+    return (
+      <div className="h-full w-full p-5 relative">
+        <div
+          className="absolute left-[4%] top-[6%] w-[48%] h-[54%]"
+          style={{ transform: 'rotate(-4deg)' }}
+        >
+          <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-[4%] top-[20%] w-[44%] h-[46%]"
+          style={{ transform: 'rotate(3deg)' }}
+        >
+          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute left-[22%] bottom-[8%] w-[50%] h-[38%]"
+          style={{ transform: 'rotate(-2deg)' }}
+        >
+          <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div className="absolute bottom-2 right-4">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-full w-full flex flex-col p-5 gap-3">
       <div className="flex-1 grid grid-cols-3 grid-rows-2 gap-3">
@@ -1163,11 +1608,12 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
 }
 
 /* ============================================================
- *  版式 6：四格拼贴
+ *  版式 6：四格拼贴 —— 每 style 独立骨架
  * ============================================================ */
 function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
-  const { style } = template;
+  const { style, colors, fontFamily } = template;
 
+  /* vintage：散摆 2×2 */
   if (style === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col p-4 gap-3">
@@ -1186,6 +1632,125 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
     );
   }
 
+  /* minimal：严格 2×2 + 每张编号 01/02/03/04 */
+  if (style === 'minimal') {
+    return (
+      <div className="h-full w-full flex flex-col p-8 gap-4">
+        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-5">
+          {photos.slice(0, 4).map((p, i) => (
+            <div key={p.id} className="relative">
+              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+              <div
+                className="absolute -top-3 -left-1 text-[10px] tracking-[0.3em] px-1"
+                style={{ background: colors.paper, color: colors.accent }}
+              >
+                0{i + 1}
+              </div>
+            </div>
+          ))}
+        </div>
+        {caption && (
+          <div
+            className="text-sm italic leading-relaxed"
+            style={{ fontFamily: fontFamily.title, color: colors.text }}
+          >
+            "{caption}"
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* watercolor：大小错落马赛克（1 大 + 3 小） */
+  if (style === 'watercolor') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="flex-1 grid grid-cols-4 grid-rows-3 gap-3">
+          <PhotoFrame photo={photos[0]} template={template} className="col-span-3 row-span-2" />
+          <PhotoFrame photo={photos[1]} template={template} className="col-span-1 row-span-1 col-start-4" />
+          <PhotoFrame photo={photos[2]} template={template} className="col-span-1 row-span-2 col-start-4 row-start-2" />
+          <PhotoFrame photo={photos[3]} template={template} className="col-span-3 row-span-1 row-start-3" />
+        </div>
+        {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+      </div>
+    );
+  }
+
+  /* cartoon：蜂窝 1 大 3 小交错 */
+  if (style === 'cartoon') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="flex-1 grid grid-cols-3 grid-rows-3 gap-3">
+          <PhotoFrame photo={photos[0]} template={template} className="col-span-2 row-span-2" />
+          <PhotoFrame photo={photos[1]} template={template} className="col-span-1 row-span-1 col-start-3" />
+          <PhotoFrame photo={photos[2]} template={template} className="col-span-1 row-span-2 col-start-3 row-start-2" />
+          <PhotoFrame photo={photos[3]} template={template} className="col-span-2 row-span-1 row-start-3" />
+        </div>
+        {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+      </div>
+    );
+  }
+
+  /* festival-cn：中心对称四宫格（像窗花） */
+  if (style === 'festival-cn') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="flex-1 relative">
+          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-4">
+            {photos.slice(0, 4).map((p) => (
+              <PhotoFrame key={p.id} photo={p} template={template} />
+            ))}
+          </div>
+          {/* 中央金色印章 */}
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-xs font-bold rounded-full"
+            style={{
+              background: colors.accent,
+              color: colors.paper,
+              boxShadow: `0 0 0 3px ${colors.primary}`,
+              fontFamily: fontFamily.title,
+            }}
+          >
+            福
+          </div>
+        </div>
+        {caption && (
+          <div
+            className="text-center text-xs tracking-[0.3em]"
+            style={{ color: colors.primary, fontFamily: fontFamily.title }}
+          >
+            — {caption} —
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* festival-xmas：对角线斜排 */
+  if (style === 'festival-xmas') {
+    return (
+      <div className="h-full w-full p-5 relative">
+        {[
+          { cls: 'absolute left-[3%] top-[3%] w-[44%] h-[44%]', r: -3 },
+          { cls: 'absolute right-[3%] top-[10%] w-[44%] h-[44%]', r: 4 },
+          { cls: 'absolute left-[10%] bottom-[10%] w-[44%] h-[44%]', r: -4 },
+          { cls: 'absolute right-[3%] bottom-[3%] w-[44%] h-[44%]', r: 3 },
+        ].map((cfg, i) =>
+          photos[i] ? (
+            <div key={photos[i].id} className={cfg.cls} style={{ transform: `rotate(${cfg.r}deg)` }}>
+              <PhotoFrame photo={photos[i]} template={template} className="w-full h-full" />
+            </div>
+          ) : null,
+        )}
+        {caption && (
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[70%]">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-full w-full flex flex-col p-5 gap-3">
       <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3">
@@ -1199,10 +1764,10 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
 }
 
 /* ============================================================
- *  版式 7：纯文字（章节页）
+ *  版式 7：纯文字（章节页）—— 每 style 独立骨架
  * ============================================================ */
 function TextLayout({ page, template }: { page: BookPage; template: Template }) {
-  const { style, colors, fontFamily } = template;
+  const { style, colors, fontFamily, decorations } = template;
 
   if (style === 'minimal') {
     return (
@@ -1239,6 +1804,134 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
             {page.caption}
           </p>
         </div>
+      </div>
+    );
+  }
+
+  /* watercolor：左上斜贴手写小标签 + 右下落款风 */
+  if (style === 'watercolor') {
+    return (
+      <div className="h-full w-full flex flex-col justify-center px-12 gap-5 relative">
+        <div
+          className="inline-block self-start px-4 py-1 text-xs tracking-[0.3em] -rotate-2"
+          style={{
+            background: `${colors.primary}22`,
+            color: colors.primary,
+            fontFamily: fontFamily.title,
+          }}
+        >
+          — CHAPTER —
+        </div>
+        <h2
+          className="text-3xl sm:text-4xl leading-[1.15] font-bold"
+          style={{ fontFamily: fontFamily.title, color: colors.primary }}
+        >
+          {page.title}
+        </h2>
+        <div className="flex items-center gap-3">
+          <div className="h-0.5 w-10 rounded-full" style={{ background: colors.primary }} />
+          <span className="text-xl" style={{ color: colors.accent }}>
+            {decorations[0]}
+          </span>
+          <div className="h-0.5 flex-1 rounded-full" style={{ background: `${colors.accent}55` }} />
+        </div>
+        <p className="text-sm italic leading-loose max-w-md opacity-80" style={{ fontFamily: fontFamily.title }}>
+          {page.caption}
+        </p>
+      </div>
+    );
+  }
+
+  /* cartoon：巨大气泡 */
+  if (style === 'cartoon') {
+    return (
+      <div className="h-full w-full flex items-center justify-center p-8">
+        <div
+          className="relative px-8 py-8 text-center max-w-[80%]"
+          style={{
+            background: colors.paper,
+            border: `4px solid ${colors.primary}`,
+            borderRadius: '32px',
+            boxShadow: `0 6px 0 ${colors.accent}`,
+          }}
+        >
+          <div className="text-3xl mb-2">{decorations[0]}</div>
+          <h2
+            className="text-2xl sm:text-3xl font-bold"
+            style={{ fontFamily: fontFamily.title, color: colors.primary }}
+          >
+            {page.title}
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed" style={{ fontFamily: fontFamily.title }}>
+            {page.caption}
+          </p>
+          <span
+            className="absolute -bottom-4 left-12 w-0 h-0"
+            style={{
+              borderLeft: '14px solid transparent',
+              borderRight: '14px solid transparent',
+              borderTop: `14px solid ${colors.primary}`,
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  /* vintage：左右留打字机缩进 + 上下两条虚线 */
+  if (style === 'vintage') {
+    return (
+      <div className="h-full w-full flex flex-col justify-center px-10 gap-5">
+        <div
+          className="w-full border-t-2 border-dashed opacity-50"
+          style={{ borderColor: colors.accent }}
+        />
+        <div className="text-xs tracking-[0.5em] opacity-70" style={{ fontFamily: fontFamily.title }}>
+          CHAPTER · 00
+        </div>
+        <h2
+          className="text-3xl font-bold leading-tight"
+          style={{ fontFamily: fontFamily.title, color: colors.primary }}
+        >
+          {page.title}
+        </h2>
+        <p
+          className="text-sm leading-loose max-w-md opacity-85 pl-4 border-l-2"
+          style={{ fontFamily: fontFamily.title, color: colors.text, borderColor: colors.accent }}
+        >
+          {page.caption}
+        </p>
+        <div
+          className="w-full border-t-2 border-dashed opacity-50"
+          style={{ borderColor: colors.accent }}
+        />
+      </div>
+    );
+  }
+
+  /* festival-xmas：大雪花 + 对角装饰 */
+  if (style === 'festival-xmas') {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center px-10 gap-4 relative">
+        <div className="text-5xl" style={{ color: colors.accent }}>
+          ❄
+        </div>
+        <h2
+          className="text-3xl font-bold text-center"
+          style={{ fontFamily: fontFamily.title, color: colors.primary }}
+        >
+          {page.title}
+        </h2>
+        <div
+          className="h-0.5 w-24"
+          style={{ background: `linear-gradient(90deg, ${colors.primary}, ${colors.accent})` }}
+        />
+        <p
+          className="text-sm italic leading-loose text-center max-w-sm opacity-85"
+          style={{ fontFamily: fontFamily.title }}
+        >
+          {page.caption}
+        </p>
       </div>
     );
   }
