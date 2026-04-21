@@ -320,12 +320,14 @@ function SafeImg({
   template,
   className = '',
   style,
+  fit = 'cover',
 }: {
   src: string;
   alt?: string;
   template: Template;
   className?: string;
   style?: CSSProperties;
+  fit?: 'cover' | 'contain';
 }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) {
@@ -335,6 +337,7 @@ function SafeImg({
       </div>
     );
   }
+  const objectFitClass = fit === 'contain' ? 'object-contain' : 'object-cover';
   return (
     <img
       src={src}
@@ -342,7 +345,7 @@ function SafeImg({
       loading="eager"
       decoding="async"
       draggable={false}
-      className={`h-full w-full object-cover ${className}`}
+      className={`h-full w-full ${objectFitClass} ${className}`}
       style={style}
       onError={() => setFailed(true)}
       // 尽早触发 decode，避免翻页时才首次解码导致跳动
@@ -363,11 +366,17 @@ function PhotoFrame({
   template,
   rotate = 0,
   className = '',
+  fit = 'cover',
 }: {
   photo: Photo;
   template: Template;
   rotate?: number;
   className?: string;
+  /**
+   * 'cover'：默认，填满相框并裁切边缘（照片比例与相框不一致时会丢失一部分画面）
+   * 'contain'：完整显示照片、不变形不裁切，多余空间由相框纸色填充（适合水彩等对"形状舒服"要求极高的风格）
+   */
+  fit?: 'cover' | 'contain';
 }) {
   const { style, colors } = template;
 
@@ -422,6 +431,7 @@ function PhotoFrame({
 
   if (style === 'watercolor') {
     // 柔和圆角长方形 + 纸质白边 + 淡彩投影（水彩画纸贴纸感）
+    // fit='contain' 时用纸色背景补白，避免把普通照片拉变形
     return (
       <div
         className={`overflow-hidden rounded-2xl ${className}`}
@@ -429,10 +439,14 @@ function PhotoFrame({
           background: colors.paper,
           padding: '6px',
           boxShadow: `0 6px 18px ${colors.primary}33, 0 0 0 1px ${colors.accent}22`,
+          transform: rotate ? `rotate(${rotate}deg)` : undefined,
         }}
       >
-        <div className="w-full h-full overflow-hidden rounded-xl">
-          <SafeImg src={photo.src} template={template} />
+        <div
+          className="w-full h-full overflow-hidden rounded-xl"
+          style={{ background: fit === 'contain' ? colors.paper : undefined }}
+        >
+          <SafeImg src={photo.src} template={template} fit={fit} />
         </div>
       </div>
     );
@@ -1029,25 +1043,32 @@ function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: st
     );
   }
 
-  /* watercolor：照片圆角 + 右下角重叠手写贴纸（撕边感） */
+  /* watercolor：居中 4:5 方形大图 + 右下角重叠手写贴纸（撕边感），不再铺满长条 */
   if (style === 'watercolor') {
     return (
-      <div className="h-full w-full p-6 relative">
-        <PhotoFrame photo={photo} template={template} className="w-full h-full" />
-        {caption && (
-          <div
-            className="absolute bottom-4 right-4 max-w-[70%] px-4 py-2 text-sm shadow-md"
-            style={{
-              background: colors.paper,
-              color: colors.text,
-              fontFamily: fontFamily.title,
-              transform: 'rotate(-2deg)',
-              border: `1px dashed ${colors.primary}55`,
-            }}
-          >
-            {caption}
-          </div>
-        )}
+      <div className="h-full w-full p-6 relative flex items-center justify-center">
+        <div className="relative w-[88%]" style={{ aspectRatio: '4 / 5' }}>
+          <PhotoFrame
+            photo={photo}
+            template={template}
+            fit="contain"
+            className="w-full h-full"
+          />
+          {caption && (
+            <div
+              className="absolute -bottom-3 -right-2 max-w-[70%] px-4 py-2 text-sm shadow-md"
+              style={{
+                background: colors.paper,
+                color: colors.text,
+                fontFamily: fontFamily.title,
+                transform: 'rotate(-2deg)',
+                border: `1px dashed ${colors.primary}55`,
+              }}
+            >
+              {caption}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -1166,7 +1187,16 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
   if (style === 'watercolor') {
     return (
       <div className="h-full w-full flex p-5 gap-4 items-center">
-        <PhotoFrame photo={photo} template={template} className="flex-[3] h-[86%]" />
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full max-h-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame
+              photo={photo}
+              template={template}
+              fit="contain"
+              className="w-full h-full"
+            />
+          </div>
+        </div>
         <div className="flex-[2] flex flex-col justify-center gap-3 relative">
           <div
             className="text-3xl opacity-70 -mb-2"
@@ -1326,25 +1356,34 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* watercolor：上下错落 + 大小不同（第二张微旋重叠一角） */
+  /* watercolor：两张接近方形画框错落重叠（使用 contain，照片永不变形） */
   if (style === 'watercolor') {
     return (
       <div className="h-full w-full p-5 relative">
-        <PhotoFrame
-          photo={photos[0]}
-          template={template}
-          className="absolute left-[6%] top-[8%] w-[62%] h-[58%]"
-        />
         <div
-          className="absolute right-[6%] bottom-[14%] w-[52%] h-[48%]"
-          style={{ transform: 'rotate(3deg)' }}
+          className="absolute left-[6%] top-[8%] w-[54%]"
+          style={{ aspectRatio: '1 / 1' }}
         >
-          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+          <PhotoFrame
+            photo={photos[0]}
+            template={template}
+            fit="contain"
+            className="w-full h-full"
+          />
+        </div>
+        <div
+          className="absolute right-[6%] bottom-[16%] w-[50%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(3deg)' }}
+        >
+          <PhotoFrame
+            photo={photos[1]}
+            template={template}
+            fit="contain"
+            className="w-full h-full"
+          />
         </div>
         {caption && (
-          <div
-            className="absolute bottom-3 left-6 right-6 text-center"
-          >
+          <div className="absolute bottom-3 left-6 right-6 text-center">
             <StyledCaption caption={caption} template={template} />
           </div>
         )}
@@ -1491,26 +1530,42 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
     );
   }
 
-  /* watercolor：大图居左，右侧两张圆润重叠错位 */
+  /* watercolor：主图 4:5 居左 + 右侧两张 1:1 小方图错落（全部 contain，照片不变形） */
   if (style === 'watercolor') {
     return (
       <div className="h-full w-full p-5 relative">
-        <PhotoFrame
-          photo={photos[0]}
-          template={template}
-          className="absolute left-[5%] top-[5%] w-[58%] h-[72%]"
-        />
         <div
-          className="absolute right-[4%] top-[8%] w-[42%] h-[42%]"
-          style={{ transform: 'rotate(3deg)' }}
+          className="absolute left-[5%] top-[6%] w-[56%]"
+          style={{ aspectRatio: '4 / 5' }}
         >
-          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+          <PhotoFrame
+            photo={photos[0]}
+            template={template}
+            fit="contain"
+            className="w-full h-full"
+          />
         </div>
         <div
-          className="absolute right-[10%] bottom-[6%] w-[44%] h-[40%]"
-          style={{ transform: 'rotate(-4deg)' }}
+          className="absolute right-[4%] top-[8%] w-[40%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(3deg)' }}
         >
-          <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+          <PhotoFrame
+            photo={photos[1]}
+            template={template}
+            fit="contain"
+            className="w-full h-full"
+          />
+        </div>
+        <div
+          className="absolute right-[10%] bottom-[6%] w-[42%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(-4deg)' }}
+        >
+          <PhotoFrame
+            photo={photos[2]}
+            template={template}
+            fit="contain"
+            className="w-full h-full"
+          />
         </div>
         {caption && (
           <div className="absolute bottom-2 left-4">
@@ -1661,17 +1716,35 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
     );
   }
 
-  /* watercolor：大小错落马赛克（1 大 + 3 小） */
+  /* watercolor：四张近方形画框错落散贴（无任何长条形，全部 contain 不变形） */
   if (style === 'watercolor') {
+    const tiles: Array<{ cls: string; r: number; ratio: string }> = [
+      { cls: 'absolute left-[4%] top-[4%] w-[44%]', r: -3, ratio: '1 / 1' },
+      { cls: 'absolute right-[4%] top-[10%] w-[42%]', r: 2.5, ratio: '4 / 5' },
+      { cls: 'absolute left-[10%] bottom-[6%] w-[42%]', r: -2, ratio: '4 / 5' },
+      { cls: 'absolute right-[4%] bottom-[4%] w-[44%]', r: 3, ratio: '1 / 1' },
+    ];
     return (
-      <div className="h-full w-full flex flex-col p-5 gap-3">
-        <div className="flex-1 grid grid-cols-4 grid-rows-3 gap-3">
-          <PhotoFrame photo={photos[0]} template={template} className="col-span-3 row-span-2" />
-          <PhotoFrame photo={photos[1]} template={template} className="col-span-1 row-span-1 col-start-4" />
-          <PhotoFrame photo={photos[2]} template={template} className="col-span-1 row-span-2 col-start-4 row-start-2" />
-          <PhotoFrame photo={photos[3]} template={template} className="col-span-3 row-span-1 row-start-3" />
-        </div>
-        {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+      <div className="h-full w-full p-5 relative">
+        {photos.slice(0, 4).map((p, i) => (
+          <div
+            key={p.id}
+            className={tiles[i].cls}
+            style={{ aspectRatio: tiles[i].ratio, transform: `rotate(${tiles[i].r}deg)` }}
+          >
+            <PhotoFrame
+              photo={p}
+              template={template}
+              fit="contain"
+              className="w-full h-full"
+            />
+          </div>
+        ))}
+        {caption && (
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[70%]">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
       </div>
     );
   }
