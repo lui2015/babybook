@@ -6,8 +6,9 @@ import { getBook, saveBook, deleteBook } from '../storage';
 import { getTemplateById } from '../templates';
 import { PageView } from '../components/PageView';
 import { BookFlip } from '../components/BookFlip';
+import { PageTextEditor } from '../components/PageTextEditor';
 import { exportBookToPdf } from '../exportPdf';
-import type { Book } from '../types';
+import type { Book, BookPage } from '../types';
 
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,7 +17,10 @@ export function BookDetailPage() {
   const [index, setIndex] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportHint, setExportHint] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
+  // 防抖落库定时器
+  const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -42,6 +46,16 @@ export function BookDetailPage() {
     });
   }, [book]);
 
+  // 组件卸载时，若还有未落库的改动，立即 flush
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, []);
+
   if (!book) {
     return <div className="py-20 text-center text-neutral-500">加载中…</div>;
   }
@@ -64,6 +78,32 @@ export function BookDetailPage() {
     if (!confirm('确定删除此画册？')) return;
     await deleteBook(book!.id);
     navigate('/my');
+  }
+
+  /**
+   * 更新画册：先本地 state 即时刷新（UI 立刻变），再 600ms 防抖落 IndexedDB
+   * 文字编辑是高频操作（逐字敲），不能每次输入都写 IDB。
+   */
+  function updateBookLocal(next: Book) {
+    setBook(next);
+    if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveBook(next).catch((e) => console.error('save book failed', e));
+      saveTimerRef.current = null;
+    }, 600);
+  }
+
+  /** 编辑器：更新当前页文字字段 */
+  function handlePageChange(patch: Partial<Pick<BookPage, 'title' | 'subtitle' | 'caption'>>) {
+    if (!book) return;
+    const nextPages = book.pages.map((p, i) => (i === index ? { ...p, ...patch } : p));
+    updateBookLocal({ ...book, pages: nextPages, updatedAt: Date.now() });
+  }
+
+  /** 编辑器：更新画册级元数据 */
+  function handleBookMetaChange(patch: Partial<{ title: string; babyName: string; dateRange: string }>) {
+    if (!book) return;
+    updateBookLocal({ ...book, ...patch, updatedAt: Date.now() });
   }
 
   async function exportCurrentPage() {
@@ -191,6 +231,7 @@ export function BookDetailPage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <ToolBtn onClick={renameBook}>重命名</ToolBtn>
+          <ToolBtn onClick={() => setEditorOpen(true)}>编辑文字</ToolBtn>
           <ToolBtn onClick={shareBook}>分享</ToolBtn>
           <ToolBtn onClick={exportCurrentPage} disabled={exporting}>
             保存当前页
@@ -218,7 +259,11 @@ export function BookDetailPage() {
       )}
 
       {/* 主视图（使用共用翻页组件） */}
-      <div className="no-print">
+      <div
+        className="no-print"
+        onDoubleClick={() => setEditorOpen(true)}
+        title="双击可编辑当前页文字"
+      >
         <BookFlip
           book={book}
           template={template}
@@ -228,6 +273,24 @@ export function BookDetailPage() {
           minStageHeight="60vh"
         />
       </div>
+      <div className="text-center text-xs text-neutral-400 mt-1 no-print">
+        提示：双击画面或点击上方「编辑文字」可修改每页的标题与配文
+      </div>
+
+      {/* 文字编辑抽屉 */}
+      <PageTextEditor
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        page={book.pages[index]}
+        template={template}
+        bookTitle={book.title}
+        babyName={book.babyName}
+        dateRange={book.dateRange}
+        pageNumber={index + 1}
+        totalPages={total}
+        onPageChange={handlePageChange}
+        onBookMetaChange={handleBookMetaChange}
+      />
 
       {/* 打印专用：所有页顺序平铺（每页一页 A4） */}
       <div className="print-only">
