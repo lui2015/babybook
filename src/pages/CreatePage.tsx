@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDraft } from '../DraftContext';
 import { filesToPhotos } from '../imageUtils';
-import { TEMPLATES, TEMPLATE_CATEGORIES, getTemplateById } from '../templates';
+import { TEMPLATE_CATEGORIES } from '../templates';
+import { useTemplateRegistry } from '../TemplateRegistry';
 import { generatePages } from '../layoutEngine';
 import { saveBook } from '../storage';
 import { BookFlip } from '../components/BookFlip';
@@ -13,6 +14,7 @@ type Step = 'upload' | 'info' | 'template' | 'generate';
 export function CreatePage() {
   const draft = useDraft();
   const navigate = useNavigate();
+  const { getTemplate } = useTemplateRegistry();
   const [step, setStep] = useState<Step>('upload');
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -21,7 +23,7 @@ export function CreatePage() {
   const [presetHint, setPresetHint] = useState<string | null>(null);
   useEffect(() => {
     if (!urlTemplateId) return;
-    const tpl = getTemplateById(urlTemplateId);
+    const tpl = getTemplate(urlTemplateId);
     if (tpl) {
       draft.setTemplateId(tpl.id);
       setPresetHint(tpl.name);
@@ -264,8 +266,9 @@ function StepInfo({ onBack, onNext }: { onBack: () => void; onNext: () => void }
 // ————— Step 3: 模板 —————
 function StepTemplate({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
   const { templateId, setTemplateId } = useDraft();
+  const { allTemplates } = useTemplateRegistry();
   const [category, setCategory] = useState<string>('全部');
-  const list = TEMPLATES.filter((t) => category === '全部' || t.category === category);
+  const list = allTemplates.filter((t) => category === '全部' || t.category === category);
 
   return (
     <div className="space-y-4">
@@ -359,6 +362,7 @@ function StepGenerate({
   onDone: (book: Book) => void;
 }) {
   const { photos, babyName, dateRange, templateId } = useDraft();
+  const { getTemplate } = useTemplateRegistry();
   const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<Book | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -372,7 +376,7 @@ function StepGenerate({
       setProgress(p);
       if (p >= 100) {
         clearInterval(timer);
-        const tpl = getTemplateById(templateId)!;
+        const tpl = getTemplate(templateId)!;
         const pages = generatePages(photos, {
           insertTextPages: true,
           template: tpl,
@@ -413,7 +417,7 @@ function StepGenerate({
     );
   }
 
-  const tpl = getTemplateById(preview.templateId)!;
+  const tpl = getTemplate(preview.templateId)!;
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">

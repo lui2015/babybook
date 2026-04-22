@@ -5,24 +5,30 @@ import { CreatePage } from './pages/CreatePage';
 import { MyBooksPage } from './pages/MyBooksPage';
 import { BookDetailPage } from './pages/BookDetailPage';
 import { TemplatesPage } from './pages/TemplatesPage';
+import { TemplateEditorPage } from './pages/TemplateEditorPage';
 import { DraftProvider } from './DraftContext';
+import { TemplateRegistryProvider } from './TemplateRegistry';
 
 export default function App() {
   return (
-    <DraftProvider>
-      <div className="min-h-screen">
-        <AppHeader />
-        <main>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/templates" element={<TemplatesPage />} />
-            <Route path="/create" element={<CreatePage />} />
-            <Route path="/my" element={<MyBooksPage />} />
-            <Route path="/book/:id" element={<BookDetailPage />} />
-            <Route path="*" element={<HomePage />} />
-          </Routes>
-        </main>
-      </div>
-    </DraftProvider>
+    <TemplateRegistryProvider>
+      <DraftProvider>
+        <div className="min-h-screen">
+          <AppHeader />
+          <main>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/templates/new" element={<TemplateEditorPage />} />
+              <Route path="/templates/edit/:id" element={<TemplateEditorPage />} />
+              <Route path="/create" element={<CreatePage />} />
+              <Route path="/my" element={<MyBooksPage />} />
+              <Route path="/book/:id" element={<BookDetailPage />} />
+              <Route path="*" element={<HomePage />} />
+            </Routes>
+          </main>
+        </div>
+      </DraftProvider>
+    </TemplateRegistryProvider>
   );
 }

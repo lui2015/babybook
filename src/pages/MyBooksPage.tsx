@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listBooks, deleteBook } from '../storage';
-import { getTemplateById } from '../templates';
+import { useTemplateRegistry } from '../TemplateRegistry';
 import { PageView } from '../components/PageView';
 import type { Book } from '../types';
 
@@ -59,7 +59,8 @@ export function MyBooksPage() {
 }
 
 function BookCard({ book, onDelete }: { book: Book; onDelete: () => void }) {
-  const template = getTemplateById(book.templateId);
+  const { getTemplate } = useTemplateRegistry();
+  const template = getTemplate(book.templateId);
   const cover = book.pages[0];
 
   async function handleDelete(e: React.MouseEvent) {

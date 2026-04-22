@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { useNavigate, useParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { getBook, saveBook, deleteBook } from '../storage';
-import { getTemplateById } from '../templates';
+import { useTemplateRegistry } from '../TemplateRegistry';
 import { PageView } from '../components/PageView';
 import { BookFlip } from '../components/BookFlip';
 import { PageTextEditor } from '../components/PageTextEditor';
@@ -13,6 +13,7 @@ import type { Book, BookPage } from '../types';
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { getTemplate } = useTemplateRegistry();
   const [book, setBook] = useState<Book | null>(null);
   const [index, setIndex] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -59,7 +60,7 @@ export function BookDetailPage() {
   if (!book) {
     return <div className="py-20 text-center text-neutral-500">加载中…</div>;
   }
-  const template = getTemplateById(book.templateId);
+  const template = getTemplate(book.templateId);
   if (!template) {
     return <div className="py-20 text-center text-rose-600">模板不存在</div>;
   }
