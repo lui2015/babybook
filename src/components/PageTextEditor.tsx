@@ -244,6 +244,10 @@ function layoutLabel(layout: BookPage['layout']): string {
       return '三图';
     case 'grid4':
       return '四格';
+    case 'grid5':
+      return '五图';
+    case 'grid6':
+      return '六图';
     case 'text':
       return '文字页';
     case 'ending':

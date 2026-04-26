@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { memo, useState } from 'react';
 import type { BookPage, Photo, Template, TemplateStyle } from '../types';
+import { defaultVariantId } from '../layoutVariants';
 
 interface Props {
   page: BookPage;
@@ -38,6 +39,12 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
     }
     const n = pagePhotos.length;
     if (n === 0) return 'text'; // 零图 → 走纯文字版式兜底
+    if (page.layout === 'grid6' && n < 6) {
+      return n >= 5 ? 'grid5' : n >= 4 ? 'grid4' : n >= 3 ? 'triple' : n >= 2 ? 'double' : 'single';
+    }
+    if (page.layout === 'grid5' && n < 5) {
+      return n >= 4 ? 'grid4' : n >= 3 ? 'triple' : n >= 2 ? 'double' : 'single';
+    }
     if (page.layout === 'grid4' && n < 4) return n >= 3 ? 'triple' : n >= 2 ? 'double' : 'single';
     if (page.layout === 'triple' && n < 3) return n >= 2 ? 'double' : 'single';
     if (page.layout === 'double' && n < 2) return 'single';
@@ -108,6 +115,14 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
 
       {resolvedLayout === 'grid4' && pagePhotos.length >= 4 && (
         <Grid4Layout photos={pagePhotos} caption={page.caption} template={template} />
+      )}
+
+      {resolvedLayout === 'grid5' && pagePhotos.length >= 5 && (
+        <Grid5Layout photos={pagePhotos} caption={page.caption} template={template} />
+      )}
+
+      {resolvedLayout === 'grid6' && pagePhotos.length >= 6 && (
+        <Grid6Layout photos={pagePhotos} caption={page.caption} template={template} />
       )}
 
       {resolvedLayout === 'text' && <TextLayout page={fallbackPage} template={template} />}
@@ -1342,6 +1357,12 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
 function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
 
+  // 用户模板若显式指定了变体，优先走通用 variant 骨架（相框/气泡仍随 style）
+  const variant = template.layoutVariants?.double;
+  if (variant) {
+    return <DoubleVariant variant={variant} photos={photos} caption={caption} template={template} />;
+  }
+
   /* vintage：两张 Polaroid 方形微旋错落（1:1 方形，不再竖长条） */
   if (style === 'vintage') {
     return (
@@ -1526,6 +1547,11 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
  * ============================================================ */
 function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
+
+  const variant = template.layoutVariants?.triple;
+  if (variant) {
+    return <TripleVariant variant={variant} photos={photos} caption={caption} template={template} />;
+  }
 
   /* vintage：三张 Polaroid 散摆（全部接近方形比例，不变形） */
   if (style === 'vintage') {
@@ -1766,6 +1792,11 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
  * ============================================================ */
 function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
   const { style, colors, fontFamily } = template;
+
+  const variant = template.layoutVariants?.grid4;
+  if (variant) {
+    return <Grid4Variant variant={variant} photos={photos} caption={caption} template={template} />;
+  }
 
   /* vintage：四张 Polaroid 2×2 散摆（每张 1:1 方形，不变形） */
   if (style === 'vintage') {
@@ -2349,3 +2380,434 @@ function EndingLayout({
 // 声明不会被 tsc 报告为 unused 的类型（为风格分支的完整性做文档）
 type _Style = TemplateStyle;
 void ((_s: _Style) => _s);
+
+/* ============================================================
+ *  通用多图 Variant 渲染（Double / Triple / Grid4 / Grid5 / Grid6）
+ *
+ *  设计原则：
+ *  - 变体只控制「照片块的位置、比例、旋转」这种骨架层级的事
+ *  - 相框样式、caption 气泡仍然复用 PhotoFrame / StyledCaption，
+ *    这样同一个变体在任何 style 下都能保持风格一致性
+ *  - 所有变体都使用接近方形（1:1 / 4:5）的画框，避免长条变形
+ * ============================================================ */
+
+function DoubleVariant({
+  variant,
+  photos,
+  caption,
+  template,
+}: {
+  variant: string;
+  photos: Photo[];
+  caption?: string;
+  template: Template;
+}) {
+  if (variant === 'big-small') {
+    return (
+      <div className="h-full w-full flex p-5 gap-3 items-center">
+        <div className="flex-[7] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+          </div>
+        </div>
+        <div className="flex-[3] flex flex-col gap-3 items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+          </div>
+          {caption && (
+            <div className="w-full text-center">
+              <StyledCaption caption={caption} template={template} size="sm" />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'stack-overlap') {
+    return (
+      <div className="h-full w-full p-5 relative">
+        <div
+          className="absolute left-[6%] top-[8%] w-[54%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(-3deg)' }}
+        >
+          <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-[6%] bottom-[16%] w-[52%]"
+          style={{ aspectRatio: '1 / 1', transform: 'rotate(3deg)' }}
+        >
+          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div className="absolute bottom-3 left-6 right-6 text-center">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // equal（默认）：两张 1:1 等分并排
+  return (
+    <div className="h-full w-full flex flex-col p-5 gap-3">
+      <div className="flex-1 flex gap-3 items-center">
+        {photos.slice(0, 2).map((p) => (
+          <div key={p.id} className="flex-1 flex items-center justify-center">
+            <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+            </div>
+          </div>
+        ))}
+      </div>
+      {caption && <StyledCaption caption={caption} template={template} />}
+    </div>
+  );
+}
+
+function TripleVariant({
+  variant,
+  photos,
+  caption,
+  template,
+}: {
+  variant: string;
+  photos: Photo[];
+  caption?: string;
+  template: Template;
+}) {
+  if (variant === 'row') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="flex-1 flex gap-3 items-center">
+          {photos.slice(0, 3).map((p) => (
+            <div key={p.id} className="flex-1 flex items-center justify-center">
+              <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+                <PhotoFrame photo={p} template={template} className="w-full h-full" />
+              </div>
+            </div>
+          ))}
+        </div>
+        {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+      </div>
+    );
+  }
+
+  if (variant === 'scatter') {
+    const tiles: Array<{ cls: string; r: number; ratio: string }> = [
+      { cls: 'absolute left-[4%] top-[4%] w-[48%]', r: -4, ratio: '4 / 5' },
+      { cls: 'absolute right-[4%] top-[10%] w-[44%]', r: 3, ratio: '1 / 1' },
+      { cls: 'absolute left-[22%] bottom-[4%] w-[52%]', r: -2, ratio: '1 / 1' },
+    ];
+    return (
+      <div className="h-full w-full p-5 relative">
+        {photos.slice(0, 3).map((p, i) => (
+          <div
+            key={p.id}
+            className={tiles[i].cls}
+            style={{ aspectRatio: tiles[i].ratio, transform: `rotate(${tiles[i].r}deg)` }}
+          >
+            <PhotoFrame photo={p} template={template} className="w-full h-full" />
+          </div>
+        ))}
+        {caption && (
+          <div className="absolute bottom-2 right-4">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // big-two（默认）：左 4:5 主图 + 右 2×1:1 副图
+  return (
+    <div className="h-full w-full flex p-5 gap-3 items-center">
+      <div className="flex-[3] flex items-center justify-center">
+        <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+          <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+        </div>
+      </div>
+      <div className="flex-[2] flex flex-col gap-3 justify-center">
+        <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+        </div>
+        <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+          <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div className="mt-1">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Grid4Variant({
+  variant,
+  photos,
+  caption,
+  template,
+}: {
+  variant: string;
+  photos: Photo[];
+  caption?: string;
+  template: Template;
+}) {
+  if (variant === 'scatter') {
+    const tiles: Array<{ cls: string; r: number; ratio: string }> = [
+      { cls: 'absolute left-[4%] top-[4%] w-[44%]', r: -3, ratio: '1 / 1' },
+      { cls: 'absolute right-[4%] top-[10%] w-[42%]', r: 2.5, ratio: '4 / 5' },
+      { cls: 'absolute left-[10%] bottom-[6%] w-[42%]', r: -2, ratio: '4 / 5' },
+      { cls: 'absolute right-[4%] bottom-[4%] w-[44%]', r: 3, ratio: '1 / 1' },
+    ];
+    return (
+      <div className="h-full w-full p-5 relative">
+        {photos.slice(0, 4).map((p, i) => (
+          <div
+            key={p.id}
+            className={tiles[i].cls}
+            style={{ aspectRatio: tiles[i].ratio, transform: `rotate(${tiles[i].r}deg)` }}
+          >
+            <PhotoFrame photo={p} template={template} className="w-full h-full" />
+          </div>
+        ))}
+        {caption && (
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[70%]">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (variant === 'hero-right') {
+    return (
+      <div className="h-full w-full flex p-5 gap-3 items-center">
+        <div className="flex-[2] flex flex-col gap-3 justify-center">
+          {photos.slice(0, 3).map((p) => (
+            <div key={p.id} className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+            </div>
+          ))}
+        </div>
+        <div className="flex-[3] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photos[3]} template={template} className="w-full h-full" />
+          </div>
+          {caption && (
+            <div className="absolute bottom-2 right-6">
+              <StyledCaption caption={caption} template={template} size="sm" />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // grid-2x2（默认）
+  return (
+    <div className="h-full w-full flex flex-col p-5 gap-3">
+      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3 content-center">
+        {photos.slice(0, 4).map((p) => (
+          <div key={p.id} className="flex items-center justify-center">
+            <div className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+            </div>
+          </div>
+        ))}
+      </div>
+      {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+    </div>
+  );
+}
+
+/* ============================================================
+ *  版式 7：五图拼贴 —— 全部走 Variant 渲染（没有旧 style 分支）
+ * ============================================================ */
+function Grid5Layout({
+  photos,
+  caption,
+  template,
+}: {
+  photos: Photo[];
+  caption?: string;
+  template: Template;
+}) {
+  const variant = template.layoutVariants?.grid5 ?? defaultVariantId('grid5');
+
+  if (variant === 'hero-center') {
+    // 中央大图 + 四个角小图
+    return (
+      <div className="h-full w-full p-5 relative">
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[48%]"
+          style={{ aspectRatio: '1 / 1' }}
+        >
+          <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+        </div>
+        {[
+          { cls: 'absolute left-[3%] top-[4%] w-[26%]', i: 1 },
+          { cls: 'absolute right-[3%] top-[4%] w-[26%]', i: 2 },
+          { cls: 'absolute left-[3%] bottom-[4%] w-[26%]', i: 3 },
+          { cls: 'absolute right-[3%] bottom-[4%] w-[26%]', i: 4 },
+        ].map((cfg) => (
+          <div key={cfg.i} className={cfg.cls} style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={photos[cfg.i]} template={template} className="w-full h-full" />
+          </div>
+        ))}
+        {caption && (
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (variant === 'top1-bottom4') {
+    return (
+      <div className="h-full w-full flex flex-col p-5 gap-3">
+        <div className="h-[48%] flex items-center justify-center">
+          <div className="w-full h-full">
+            <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+          </div>
+        </div>
+        <div className="flex-1 grid grid-cols-4 gap-3 items-center">
+          {photos.slice(1, 5).map((p) => (
+            <div key={p.id} className="w-full" style={{ aspectRatio: '1 / 1' }}>
+              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+            </div>
+          ))}
+        </div>
+        {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+      </div>
+    );
+  }
+
+  // hero-left（默认）：左 4:5 大图 + 右侧 2×2 小图
+  return (
+    <div className="h-full w-full flex p-5 gap-3 items-stretch">
+      <div className="flex-[3] flex items-center justify-center">
+        <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+          <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+        </div>
+      </div>
+      <div className="flex-[2] grid grid-cols-2 grid-rows-2 gap-3 items-center">
+        {photos.slice(1, 5).map((p) => (
+          <div key={p.id} className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={p} template={template} className="w-full h-full" />
+          </div>
+        ))}
+        {caption && (
+          <div className="col-span-2 -mt-1">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+ *  版式 8：六图拼贴
+ * ============================================================ */
+function Grid6Layout({
+  photos,
+  caption,
+  template,
+}: {
+  photos: Photo[];
+  caption?: string;
+  template: Template;
+}) {
+  const variant = template.layoutVariants?.grid6 ?? defaultVariantId('grid6');
+
+  if (variant === 'hero-left-5') {
+    return (
+      <div className="h-full w-full flex p-5 gap-3 items-stretch">
+        <div className="flex-[5] flex items-center justify-center">
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+          </div>
+        </div>
+        <div className="flex-[3] flex flex-col gap-2 justify-center">
+          {photos.slice(1, 6).map((p) => (
+            <div key={p.id} className="w-full" style={{ aspectRatio: '4 / 3' }}>
+              <PhotoFrame photo={p} template={template} className="w-full h-full" />
+            </div>
+          ))}
+        </div>
+        {caption && (
+          <div className="absolute bottom-2 left-6 right-6 text-center">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (variant === 'mosaic') {
+    // 大 + 大 + 4 小：左上 4:5 + 右下 4:5 + 周围 4 张 1:1
+    return (
+      <div className="h-full w-full p-5 relative">
+        <div
+          className="absolute left-[4%] top-[4%] w-[44%]"
+          style={{ aspectRatio: '4 / 5' }}
+        >
+          <PhotoFrame photo={photos[0]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-[4%] bottom-[4%] w-[44%]"
+          style={{ aspectRatio: '4 / 5' }}
+        >
+          <PhotoFrame photo={photos[1]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-[4%] top-[4%] w-[22%]"
+          style={{ aspectRatio: '1 / 1' }}
+        >
+          <PhotoFrame photo={photos[2]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-[28%] top-[18%] w-[22%]"
+          style={{ aspectRatio: '1 / 1' }}
+        >
+          <PhotoFrame photo={photos[3]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute left-[4%] bottom-[18%] w-[22%]"
+          style={{ aspectRatio: '1 / 1' }}
+        >
+          <PhotoFrame photo={photos[4]} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute left-[28%] bottom-[4%] w-[22%]"
+          style={{ aspectRatio: '1 / 1' }}
+        >
+          <PhotoFrame photo={photos[5]} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-[50%]">
+            <StyledCaption caption={caption} template={template} size="sm" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // grid-3x2（默认）：3 列 × 2 行
+  return (
+    <div className="h-full w-full flex flex-col p-5 gap-3">
+      <div className="flex-1 grid grid-cols-3 grid-rows-2 gap-3 items-center">
+        {photos.slice(0, 6).map((p) => (
+          <div key={p.id} className="w-full" style={{ aspectRatio: '1 / 1' }}>
+            <PhotoFrame photo={p} template={template} className="w-full h-full" />
+          </div>
+        ))}
+      </div>
+      {caption && <StyledCaption caption={caption} template={template} size="sm" />}
+    </div>
+  );
+}

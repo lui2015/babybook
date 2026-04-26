@@ -40,8 +40,23 @@ export type PageLayoutType =
   | 'double'
   | 'triple'
   | 'grid4'
+  | 'grid5'
+  | 'grid6'
   | 'text'
   | 'ending';
+
+/**
+ * 多图版式的骨架变体 id
+ * - 每个 layout 有若干预设（例如 double: 'equal' | 'big-small' | 'stack'）
+ * - 变体只决定「照片块的位置/尺寸/偏移」，相框/气泡等风格装饰仍由 style 负责
+ */
+export interface LayoutVariants {
+  double?: string;
+  triple?: string;
+  grid4?: string;
+  grid5?: string;
+  grid6?: string;
+}
 
 /** 模板定义 */
 export interface Template {
@@ -78,6 +93,11 @@ export interface Template {
    * 若未提供，预览时会退回到通用 SAMPLE_PHOTOS[0]。
    */
   coverPhotoSrc?: string;
+  /**
+   * 多图版式的骨架变体选择；缺省时使用各 layout 的默认变体。
+   * 仅作用于用户"自定义模板"；内置模板可以不填，保持向后兼容。
+   */
+  layoutVariants?: LayoutVariants;
 }
 
 /** 画册中的一页 */

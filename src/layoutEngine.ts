@@ -50,6 +50,26 @@ function groupPhotos(photos: Photo[]): Array<{ layout: PageLayoutType; photos: P
       continue;
     }
 
+    // 6 张都接近方形 → 六宫格
+    if (
+      remaining >= 6 &&
+      photos.slice(i, i + 6).every((x) => x.ratio >= 0.6 && x.ratio <= 1.4)
+    ) {
+      groups.push({ layout: 'grid6', photos: photos.slice(i, i + 6) });
+      i += 6;
+      continue;
+    }
+
+    // 5 张接近方形 → 五图
+    if (
+      remaining >= 5 &&
+      photos.slice(i, i + 5).every((x) => x.ratio >= 0.6 && x.ratio <= 1.4)
+    ) {
+      groups.push({ layout: 'grid5', photos: photos.slice(i, i + 5) });
+      i += 5;
+      continue;
+    }
+
     // 如果剩余 ≥ 4 且接下来 4 张都比较接近方形 → 拼贴 4 格
     if (
       remaining >= 4 &&
