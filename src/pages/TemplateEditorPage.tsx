@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   BookPage,
+  LayoutVariants,
   Template,
   TemplateCategory,
   TemplateStyle,
@@ -26,6 +27,7 @@ import {
   type UserTemplate,
 } from '../userTemplates';
 import { useTemplateRegistry } from '../TemplateRegistry';
+import { VARIANTS, defaultVariantId } from '../layoutVariants';
 
 // —————————— 选项常量 ——————————
 
@@ -131,36 +133,65 @@ function defaultDraft(): UserTemplate {
     decorations: ['🌸', '🍃', '✿'],
     defaultTitle: '宝贝的时光',
     defaultSubtitle: 'Sweet Moments',
+    layoutVariants: {
+      double: defaultVariantId('double'),
+      triple: defaultVariantId('triple'),
+      grid4: defaultVariantId('grid4'),
+      grid5: defaultVariantId('grid5'),
+      grid6: defaultVariantId('grid6'),
+    },
     isUser: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
 
-// 预览用的 3 页样板：封面 + 双图页 + 三图页，足够让用户判断配色/字体效果
+// 预览用的 6 页样板：封面 + 2/3/4/5/6 图页
+// 让用户切到任一版式都能实时看到自己选的 variant 效果
 function buildPreviewPages(draft: UserTemplate): BookPage[] {
+  const ids = SAMPLE_PHOTOS.slice(0, 7).map((p) => p.id);
   return [
     {
       id: 'pv-cover',
       layout: 'cover',
-      photoIds: [SAMPLE_PHOTOS[0].id],
+      photoIds: [ids[0]],
       title: draft.defaultTitle || '宝贝的时光',
       subtitle: draft.defaultSubtitle || 'Sweet Moments',
     },
     {
       id: 'pv-d1',
       layout: 'double',
-      photoIds: [SAMPLE_PHOTOS[1].id, SAMPLE_PHOTOS[2].id],
+      photoIds: ids.slice(1, 3),
       caption: '第一次学会笑，第一次牵手…',
     },
     {
       id: 'pv-t1',
       layout: 'triple',
-      photoIds: [SAMPLE_PHOTOS[3].id, SAMPLE_PHOTOS[4].id, SAMPLE_PHOTOS[5].id],
+      photoIds: ids.slice(1, 4),
       caption: '吃、笑、睡 —— 每一刻都可爱',
+    },
+    {
+      id: 'pv-g4',
+      layout: 'grid4',
+      photoIds: ids.slice(1, 5),
+      caption: '四格回忆',
+    },
+    {
+      id: 'pv-g5',
+      layout: 'grid5',
+      photoIds: ids.slice(1, 6),
+      caption: '五格片段',
+    },
+    {
+      id: 'pv-g6',
+      layout: 'grid6',
+      photoIds: ids.slice(1, 7),
+      caption: '六格拼图',
     },
   ];
 }
+
+const PREVIEW_TABS = ['封面', '双图', '三图', '四图', '五图', '六图'] as const;
 
 // —————————— 组件 ——————————
 
@@ -223,6 +254,12 @@ export function TemplateEditorPage() {
   const updateFont = (patch: Partial<Template['fontFamily']>) =>
     setDraft((prev) =>
       prev ? { ...prev, fontFamily: { ...prev.fontFamily, ...patch } } : prev,
+    );
+  const updateVariant = (patch: Partial<LayoutVariants>) =>
+    setDraft((prev) =>
+      prev
+        ? { ...prev, layoutVariants: { ...(prev.layoutVariants ?? {}), ...patch } }
+        : prev,
     );
 
   const handleApplyBgPreset = (
@@ -527,6 +564,62 @@ export function TemplateEditorPage() {
               </Field>
             </div>
           </Section>
+
+          <Section title="版式方案">
+            <p className="text-[11px] text-neutral-500 mb-2">
+              为每种多图页面选择排版方案；右侧预览会即时切换效果
+            </p>
+            <VariantPicker
+              title="双图页"
+              tabIndex={1}
+              variants={VARIANTS.double}
+              value={draft.layoutVariants?.double ?? defaultVariantId('double')}
+              onChange={(id) => {
+                updateVariant({ double: id });
+                setPreviewPageIndex(1);
+              }}
+            />
+            <VariantPicker
+              title="三图页"
+              tabIndex={2}
+              variants={VARIANTS.triple}
+              value={draft.layoutVariants?.triple ?? defaultVariantId('triple')}
+              onChange={(id) => {
+                updateVariant({ triple: id });
+                setPreviewPageIndex(2);
+              }}
+            />
+            <VariantPicker
+              title="四图页"
+              tabIndex={3}
+              variants={VARIANTS.grid4}
+              value={draft.layoutVariants?.grid4 ?? defaultVariantId('grid4')}
+              onChange={(id) => {
+                updateVariant({ grid4: id });
+                setPreviewPageIndex(3);
+              }}
+            />
+            <VariantPicker
+              title="五图页"
+              tabIndex={4}
+              variants={VARIANTS.grid5}
+              value={draft.layoutVariants?.grid5 ?? defaultVariantId('grid5')}
+              onChange={(id) => {
+                updateVariant({ grid5: id });
+                setPreviewPageIndex(4);
+              }}
+            />
+            <VariantPicker
+              title="六图页"
+              tabIndex={5}
+              variants={VARIANTS.grid6}
+              value={draft.layoutVariants?.grid6 ?? defaultVariantId('grid6')}
+              onChange={(id) => {
+                updateVariant({ grid6: id });
+                setPreviewPageIndex(5);
+              }}
+            />
+          </Section>
         </div>
 
         {/* ——— 右：实时预览 ——— */}
@@ -545,7 +638,7 @@ export function TemplateEditorPage() {
                         : 'bg-white text-neutral-600 border border-neutral-200 hover:border-neutral-400'
                     }`}
                   >
-                    {['封面', '双图', '三图'][i] ?? `第${i + 1}页`}
+                    {PREVIEW_TABS[i] ?? `第${i + 1}页`}
                   </button>
                 ))}
               </div>
@@ -651,4 +744,303 @@ function normalizeHex(v: string): string {
     return '#' + h.split('').map((c) => c + c).join('');
   }
   return '#000000';
+}
+
+// —————————— 版式方案挑选器 ——————————
+
+function VariantPicker({
+  title,
+  tabIndex,
+  variants,
+  value,
+  onChange,
+}: {
+  title: string;
+  /** 对应右侧预览 tab 的序号，用于点击时联动预览 */
+  tabIndex: number;
+  variants: { id: string; label: string; hint: string }[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[11px] text-neutral-600 font-medium mb-1.5">
+        {title}
+        <span className="ml-2 text-[10px] text-neutral-400">选一种排版</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {variants.map((v) => {
+          const selected = v.id === value;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              title={v.hint}
+              onClick={() => onChange(v.id)}
+              className={`text-left rounded-lg border overflow-hidden transition ${
+                selected
+                  ? 'border-neutral-900 ring-2 ring-neutral-900/10'
+                  : 'border-neutral-200 hover:border-neutral-400'
+              }`}
+            >
+              <div className="bg-neutral-50 border-b border-neutral-100">
+                <VariantThumb layout={tabIndexToLayout(tabIndex)} variantId={v.id} />
+              </div>
+              <div className="px-2 py-1.5">
+                <div className="text-[11px] font-medium leading-tight">{v.label}</div>
+                <div className="text-[10px] text-neutral-500 leading-tight mt-0.5">
+                  {v.hint}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type VariantLayoutKey = 'double' | 'triple' | 'grid4' | 'grid5' | 'grid6';
+
+function tabIndexToLayout(tabIndex: number): VariantLayoutKey {
+  // 预览 tab: 0=封面, 1=双图, 2=三图, 3=四图, 4=五图, 5=六图
+  const map: Record<number, VariantLayoutKey> = {
+    1: 'double',
+    2: 'triple',
+    3: 'grid4',
+    4: 'grid5',
+    5: 'grid6',
+  };
+  return map[tabIndex] ?? 'double';
+}
+
+/**
+ * 版式变体的小缩略图（纯 SVG 抽象矩形 + 尺寸/位置比例与 PageView 真实骨架保持一致）
+ * 宽高比 3:4，跟页面预览保持一致
+ */
+function VariantThumb({
+  layout,
+  variantId,
+}: {
+  layout: VariantLayoutKey;
+  variantId: string;
+}) {
+  // 画布 90×120，内缩 8px，作为相纸
+  const W = 90;
+  const H = 120;
+  const P = 8;
+  const inner = { x: P, y: P, w: W - P * 2, h: H - P * 2 };
+  const rects = getVariantRects(layout, variantId, inner);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block">
+      <rect x={0} y={0} width={W} height={H} fill="#FAFAFA" />
+      <rect
+        x={inner.x}
+        y={inner.y}
+        width={inner.w}
+        height={inner.h}
+        fill="#FFFFFF"
+        stroke="#E5E5E5"
+      />
+      {rects.map((r, i) => (
+        <g key={i} transform={r.rotate ? `rotate(${r.rotate} ${r.x + r.w / 2} ${r.y + r.h / 2})` : undefined}>
+          <rect
+            x={r.x}
+            y={r.y}
+            width={r.w}
+            height={r.h}
+            fill="#D9D9D9"
+            stroke="#A3A3A3"
+            strokeWidth={0.6}
+            rx={1.5}
+          />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotate?: number;
+}
+
+function getVariantRects(
+  layout: VariantLayoutKey,
+  variantId: string,
+  box: { x: number; y: number; w: number; h: number },
+): Rect[] {
+  // 为了避免缩略图贴边，总体再 padding 2
+  const pad = 2;
+  const x0 = box.x + pad;
+  const y0 = box.y + pad;
+  const w = box.w - pad * 2;
+  const h = box.h - pad * 2;
+  const gap = 2;
+
+  if (layout === 'double') {
+    if (variantId === 'big-small') {
+      const leftW = w * 0.62;
+      const rightW = w - leftW - gap;
+      return [
+        { x: x0, y: y0 + h * 0.1, w: leftW, h: h * 0.8 },
+        { x: x0 + leftW + gap, y: y0 + h * 0.3, w: rightW, h: rightW },
+      ];
+    }
+    if (variantId === 'stack-overlap') {
+      const s = w * 0.56;
+      return [
+        { x: x0, y: y0 + 2, w: s, h: s, rotate: -6 },
+        { x: x0 + w - s, y: y0 + h - s - 2, w: s, h: s, rotate: 6 },
+      ];
+    }
+    // equal
+    const half = (w - gap) / 2;
+    return [
+      { x: x0, y: y0 + (h - half) / 2, w: half, h: half },
+      { x: x0 + half + gap, y: y0 + (h - half) / 2, w: half, h: half },
+    ];
+  }
+
+  if (layout === 'triple') {
+    if (variantId === 'row') {
+      const third = (w - gap * 2) / 3;
+      const rh = third * 1.25;
+      return [0, 1, 2].map((i) => ({
+        x: x0 + i * (third + gap),
+        y: y0 + (h - rh) / 2,
+        w: third,
+        h: rh,
+      }));
+    }
+    if (variantId === 'scatter') {
+      return [
+        { x: x0, y: y0, w: w * 0.5, h: h * 0.55, rotate: -6 },
+        { x: x0 + w * 0.5, y: y0 + h * 0.08, w: w * 0.42, h: w * 0.42, rotate: 6 },
+        { x: x0 + w * 0.22, y: y0 + h * 0.5, w: w * 0.5, h: w * 0.5, rotate: -4 },
+      ];
+    }
+    // big-two
+    const mainW = w * 0.58;
+    const rightW = w - mainW - gap;
+    const miniH = (h - gap) / 2;
+    return [
+      { x: x0, y: y0, w: mainW, h: h },
+      { x: x0 + mainW + gap, y: y0, w: rightW, h: miniH },
+      { x: x0 + mainW + gap, y: y0 + miniH + gap, w: rightW, h: miniH },
+    ];
+  }
+
+  if (layout === 'grid4') {
+    if (variantId === 'scatter') {
+      const s = w * 0.44;
+      return [
+        { x: x0, y: y0, w: s, h: s, rotate: -5 },
+        { x: x0 + w - s, y: y0 + 3, w: s, h: s * 1.15, rotate: 4 },
+        { x: x0 + 4, y: y0 + h - s, w: s, h: s * 1.1, rotate: -3 },
+        { x: x0 + w - s, y: y0 + h - s, w: s, h: s, rotate: 5 },
+      ];
+    }
+    if (variantId === 'hero-right') {
+      const leftW = w * 0.38;
+      const rightW = w - leftW - gap;
+      const miniH = (h - gap * 2) / 3;
+      return [
+        { x: x0, y: y0, w: leftW, h: miniH },
+        { x: x0, y: y0 + miniH + gap, w: leftW, h: miniH },
+        { x: x0, y: y0 + (miniH + gap) * 2, w: leftW, h: miniH },
+        { x: x0 + leftW + gap, y: y0, w: rightW, h: h },
+      ];
+    }
+    // 2x2
+    const cw = (w - gap) / 2;
+    const ch = (h - gap) / 2;
+    return [
+      { x: x0, y: y0, w: cw, h: ch },
+      { x: x0 + cw + gap, y: y0, w: cw, h: ch },
+      { x: x0, y: y0 + ch + gap, w: cw, h: ch },
+      { x: x0 + cw + gap, y: y0 + ch + gap, w: cw, h: ch },
+    ];
+  }
+
+  if (layout === 'grid5') {
+    if (variantId === 'hero-center') {
+      const s = w * 0.5;
+      const corner = w * 0.22;
+      return [
+        { x: x0 + (w - s) / 2, y: y0 + (h - s) / 2, w: s, h: s },
+        { x: x0, y: y0, w: corner, h: corner },
+        { x: x0 + w - corner, y: y0, w: corner, h: corner },
+        { x: x0, y: y0 + h - corner, w: corner, h: corner },
+        { x: x0 + w - corner, y: y0 + h - corner, w: corner, h: corner },
+      ];
+    }
+    if (variantId === 'top1-bottom4') {
+      const topH = h * 0.5;
+      const bw = (w - gap * 3) / 4;
+      return [
+        { x: x0, y: y0, w: w, h: topH - gap },
+        ...Array.from({ length: 4 }).map((_, i) => ({
+          x: x0 + i * (bw + gap),
+          y: y0 + topH,
+          w: bw,
+          h: h - topH,
+        })),
+      ];
+    }
+    // hero-left
+    const leftW = w * 0.58;
+    const rightW = w - leftW - gap;
+    const cw = (rightW - gap) / 2;
+    const ch = (h - gap) / 2;
+    return [
+      { x: x0, y: y0, w: leftW, h: h },
+      { x: x0 + leftW + gap, y: y0, w: cw, h: ch },
+      { x: x0 + leftW + gap + cw + gap, y: y0, w: cw, h: ch },
+      { x: x0 + leftW + gap, y: y0 + ch + gap, w: cw, h: ch },
+      { x: x0 + leftW + gap + cw + gap, y: y0 + ch + gap, w: cw, h: ch },
+    ];
+  }
+
+  // grid6
+  if (variantId === 'hero-left-5') {
+    const leftW = w * 0.56;
+    const rightW = w - leftW - gap;
+    const rh = (h - gap * 4) / 5;
+    return [
+      { x: x0, y: y0, w: leftW, h: h },
+      ...Array.from({ length: 5 }).map((_, i) => ({
+        x: x0 + leftW + gap,
+        y: y0 + i * (rh + gap),
+        w: rightW,
+        h: rh,
+      })),
+    ];
+  }
+  if (variantId === 'mosaic') {
+    const big = w * 0.44;
+    const small = w * 0.22;
+    return [
+      { x: x0, y: y0, w: big, h: big * 1.25 },
+      { x: x0 + w - big, y: y0 + h - big * 1.25, w: big, h: big * 1.25 },
+      { x: x0 + w - small, y: y0, w: small, h: small },
+      { x: x0 + w - small - small - gap, y: y0 + small + 2, w: small, h: small },
+      { x: x0, y: y0 + h - small - small - gap, w: small, h: small },
+      { x: x0 + small + gap, y: y0 + h - small, w: small, h: small },
+    ];
+  }
+  // grid-3x2
+  const cw = (w - gap * 2) / 3;
+  const ch = (h - gap) / 2;
+  const rects: Rect[] = [];
+  for (let r = 0; r < 2; r++) {
+    for (let c = 0; c < 3; c++) {
+      rects.push({ x: x0 + c * (cw + gap), y: y0 + r * (ch + gap), w: cw, h: ch });
+    }
+  }
+  return rects;
 }
