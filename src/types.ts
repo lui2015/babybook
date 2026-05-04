@@ -100,6 +100,17 @@ export interface Template {
   layoutVariants?: LayoutVariants;
 }
 
+/**
+ * 单张照片在当前页的"相框形状"，按 slot 独立设置。
+ * - rect    : 保持版式本身的比例（默认，通常是方形/4:5 长方形）
+ * - rounded : 圆角方（保持版式比例，仅加大圆角）
+ * - circle  : 圆形（强制 1:1）
+ * - heart   : 心形（强制 1:1，clip-path）
+ * - star    : 五角星（强制 1:1，clip-path）
+ * - hexagon : 六边形（强制 1:1，clip-path）
+ */
+export type PhotoShape = 'rect' | 'rounded' | 'circle' | 'heart' | 'star' | 'hexagon';
+
 /** 画册中的一页 */
 export interface BookPage {
   id: string;
@@ -110,6 +121,32 @@ export interface BookPage {
   title?: string;
   subtitle?: string;
   caption?: string;
+  /**
+   * 多图版式的骨架变体（double/triple/grid4/grid5/grid6）。
+   * 不填则继承 template.layoutVariants 的选择。
+   * 由编辑器逐页设定。
+   */
+  variant?: string;
+  /**
+   * 每个 slot 的相框形状（与 photoIds 按索引对齐）。
+   * undefined 或缺省项表示使用该版式的默认形状（通常是 'rect'）。
+   * 非矩形形状会强制 1:1 比例以避免变形。
+   */
+  photoShapes?: (PhotoShape | undefined)[];
+}
+
+/** 画册级主题覆盖 —— 编辑器里用户在当前画册上的自定义，覆盖模板默认值 */
+export interface BookThemeOverride {
+  colors?: Partial<Template['colors']>;
+  fontFamily?: Partial<Template['fontFamily']>;
+  /** 背景图案 CSS（字符串或 'none' 清除），不填继承模板 */
+  backgroundPattern?: string | null;
+  /**
+   * 图片相框颜色覆盖。
+   * - undefined / null：跟随模板默认（各 style 自行决定用 primary / paper / 固定灰 等）
+   * - 十六进制色串（如 '#E63946'）：强制覆盖所有 style 的主边框/描边/相框纸色
+   */
+  photoFrameColor?: string | null;
 }
 
 /** 画册 */
@@ -122,6 +159,8 @@ export interface Book {
   pages: BookPage[];
   /** 照片资源表（仅保存缩略 dataURL，限制存储大小） */
   photos: Photo[];
+  /** 编辑器里的主题自定义，可选 */
+  theme?: BookThemeOverride;
   createdAt: number;
   updatedAt: number;
 }

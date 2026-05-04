@@ -1,39 +1,50 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { getBook, saveBook, deleteBook } from '../storage';
 import { useTemplateRegistry } from '../TemplateRegistry';
 import { PageView } from '../components/PageView';
 import { BookFlip } from '../components/BookFlip';
-import { PageTextEditor } from '../components/PageTextEditor';
 import { exportBookToPdf } from '../exportPdf';
-import type { Book, BookPage } from '../types';
+import { applyBookTheme } from '../bookTheme';
+import type { Book } from '../types';
 
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { getTemplate } = useTemplateRegistry();
   const [book, setBook] = useState<Book | null>(null);
   const [index, setIndex] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportHint, setExportHint] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
-  // 防抖落库定时器
-  const saveTimerRef = useRef<number | null>(null);
 
+  // 加载画册
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     getBook(id).then((b) => {
+      if (cancelled) return;
       if (!b) {
-        alert('画册不存在');
-        navigate('/my');
+        navigate('/my', { replace: true });
         return;
       }
       setBook(b);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [id, navigate]);
+
+  // 旧链接兼容：?edit=1 → 跳转到新的编辑器页面
+  useEffect(() => {
+    if (!book) return;
+    if (searchParams.get('edit') === '1') {
+      navigate(`/book/${book.id}/edit`, { replace: true });
+    }
+  }, [book, searchParams, navigate]);
 
   // 画册加载后：一次性对全量图片发起 decode，保证任何页的图片都已解码就位
   useEffect(() => {
@@ -47,23 +58,15 @@ export function BookDetailPage() {
     });
   }, [book]);
 
-  // 组件卸载时，若还有未落库的改动，立即 flush
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-    };
-  }, []);
-
   if (!book) {
     return <div className="py-20 text-center text-neutral-500">加载中…</div>;
   }
-  const template = getTemplate(book.templateId);
-  if (!template) {
+  const rawTemplate = getTemplate(book.templateId);
+  if (!rawTemplate) {
     return <div className="py-20 text-center text-rose-600">模板不存在</div>;
   }
+  // 应用画册级主题覆盖：颜色 / 字体 / 背景图案
+  const template = applyBookTheme(book, rawTemplate);
 
   const total = book.pages.length;
 
@@ -79,32 +82,6 @@ export function BookDetailPage() {
     if (!confirm('确定删除此画册？')) return;
     await deleteBook(book!.id);
     navigate('/my');
-  }
-
-  /**
-   * 更新画册：先本地 state 即时刷新（UI 立刻变），再 600ms 防抖落 IndexedDB
-   * 文字编辑是高频操作（逐字敲），不能每次输入都写 IDB。
-   */
-  function updateBookLocal(next: Book) {
-    setBook(next);
-    if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => {
-      saveBook(next).catch((e) => console.error('save book failed', e));
-      saveTimerRef.current = null;
-    }, 600);
-  }
-
-  /** 编辑器：更新当前页文字字段 */
-  function handlePageChange(patch: Partial<Pick<BookPage, 'title' | 'subtitle' | 'caption'>>) {
-    if (!book) return;
-    const nextPages = book.pages.map((p, i) => (i === index ? { ...p, ...patch } : p));
-    updateBookLocal({ ...book, pages: nextPages, updatedAt: Date.now() });
-  }
-
-  /** 编辑器：更新画册级元数据 */
-  function handleBookMetaChange(patch: Partial<{ title: string; babyName: string; dateRange: string }>) {
-    if (!book) return;
-    updateBookLocal({ ...book, ...patch, updatedAt: Date.now() });
   }
 
   async function exportCurrentPage() {
@@ -143,10 +120,9 @@ export function BookDetailPage() {
       root.style.flexDirection = 'column';
       root.style.gap = '20px';
       root.style.padding = '20px';
-      root.style.background = template!.colors.bg;
+      root.style.background = template.colors.bg;
       container.appendChild(root);
 
-      const pagesEl: HTMLElement[] = [];
       book!.pages.forEach((p) => {
         const el = document.createElement('div');
         el.style.width = '440px';
@@ -157,17 +133,17 @@ export function BookDetailPage() {
           <PageView
             page={p}
             photos={book!.photos}
-            template={template!}
+            template={template}
             babyName={book!.babyName}
             dateRange={book!.dateRange}
+            photoFrameColor={book!.theme?.photoFrameColor ?? null}
           />,
         );
-        pagesEl.push(el);
       });
 
       await new Promise((r) => setTimeout(r, 800));
       const canvas = await html2canvas(root, {
-        backgroundColor: template!.colors.bg,
+        backgroundColor: template.colors.bg,
         scale: 1.5,
         useCORS: true,
       });
@@ -187,7 +163,7 @@ export function BookDetailPage() {
     setExporting(true);
     setExportHint(`正在生成 PDF（0/${total}）…`);
     try {
-      await exportBookToPdf(book!, template!, (done, t) => {
+      await exportBookToPdf(book!, template, (done, t) => {
         setExportHint(`正在生成 PDF（${done}/${t}）…`);
       });
     } catch (e) {
@@ -200,10 +176,6 @@ export function BookDetailPage() {
   }
 
   function printBook() {
-    // 触发浏览器打印。打印样式在下方 <style> 里定义：
-    //  - 隐藏工具栏/箭头/缩略图等 UI，只保留画册页；
-    //  - 每页一页 A4，自动分页；
-    //  - 画册页按 3:4 等比填满 A4 版心居中。
     window.print();
   }
 
@@ -232,7 +204,9 @@ export function BookDetailPage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <ToolBtn onClick={renameBook}>重命名</ToolBtn>
-          <ToolBtn onClick={() => setEditorOpen(true)}>编辑文字</ToolBtn>
+          <ToolBtn onClick={() => navigate(`/book/${book!.id}/edit`)} primary>
+            ✎ 编辑画册
+          </ToolBtn>
           <ToolBtn onClick={shareBook}>分享</ToolBtn>
           <ToolBtn onClick={exportCurrentPage} disabled={exporting}>
             保存当前页
@@ -240,7 +214,7 @@ export function BookDetailPage() {
           <ToolBtn onClick={exportLongImage} disabled={exporting}>
             导出长图
           </ToolBtn>
-          <ToolBtn onClick={exportPdf} disabled={exporting} primary>
+          <ToolBtn onClick={exportPdf} disabled={exporting}>
             下载 PDF
           </ToolBtn>
           <ToolBtn onClick={printBook} disabled={exporting}>
@@ -262,8 +236,8 @@ export function BookDetailPage() {
       {/* 主视图（使用共用翻页组件） */}
       <div
         className="no-print"
-        onDoubleClick={() => setEditorOpen(true)}
-        title="双击可编辑当前页文字"
+        onDoubleClick={() => navigate(`/book/${book!.id}/edit`)}
+        title="双击进入编辑器"
       >
         <BookFlip
           book={book}
@@ -275,23 +249,8 @@ export function BookDetailPage() {
         />
       </div>
       <div className="text-center text-xs text-neutral-400 mt-1 no-print">
-        提示：双击画面或点击上方「编辑文字」可修改每页的标题与配文
+        提示：点击上方「编辑画册」或双击画面进入编辑器，可修改文字、排版、配色与字体
       </div>
-
-      {/* 文字编辑抽屉 */}
-      <PageTextEditor
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        page={book.pages[index]}
-        template={template}
-        bookTitle={book.title}
-        babyName={book.babyName}
-        dateRange={book.dateRange}
-        pageNumber={index + 1}
-        totalPages={total}
-        onPageChange={handlePageChange}
-        onBookMetaChange={handleBookMetaChange}
-      />
 
       {/* 打印专用：所有页顺序平铺（每页一页 A4） */}
       <div className="print-only">
@@ -304,6 +263,7 @@ export function BookDetailPage() {
                 template={template}
                 babyName={book.babyName}
                 dateRange={book.dateRange}
+                photoFrameColor={book.theme?.photoFrameColor ?? null}
               />
             </div>
           </div>

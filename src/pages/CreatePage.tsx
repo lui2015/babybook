@@ -9,7 +9,7 @@ import { saveBook } from '../storage';
 import { BookFlip } from '../components/BookFlip';
 import type { Book } from '../types';
 
-type Step = 'upload' | 'info' | 'template' | 'generate';
+type Step = 'upload' | 'template' | 'generate';
 
 export function CreatePage() {
   const draft = useDraft();
@@ -54,21 +54,18 @@ export function CreatePage() {
       )}
 
       <div className="mt-6">
-        {step === 'upload' && <StepUpload onNext={() => setStep('info')} />}
-        {step === 'info' && (
-          <StepInfo onBack={() => setStep('upload')} onNext={() => setStep('template')} />
-        )}
+        {step === 'upload' && <StepUpload onNext={() => setStep('template')} />}
         {step === 'template' && (
           <StepTemplate
-            onBack={() => setStep('info')}
+            onBack={() => setStep('upload')}
             onNext={() => setStep('generate')}
           />
         )}
         {step === 'generate' && (
           <StepGenerate
-            onDone={async (book) => {
+            onDone={async (book, opts) => {
               await saveBook(book);
-              navigate(`/book/${book.id}`);
+              navigate(`/book/${book.id}${opts?.edit ? '?edit=1' : ''}`);
             }}
             onBack={() => setStep('template')}
           />
@@ -90,9 +87,8 @@ function Stepper({
 }) {
   const steps: Array<{ key: Step; label: string; ok: boolean }> = [
     { key: 'upload', label: '1. 上传照片', ok: draft.photos.length >= 6 },
-    { key: 'info', label: '2. 画册信息', ok: !!draft.babyName },
-    { key: 'template', label: '3. 选择模板', ok: !!draft.templateId },
-    { key: 'generate', label: '4. 生成预览', ok: false },
+    { key: 'template', label: '2. 选择模板', ok: !!draft.templateId },
+    { key: 'generate', label: '3. 生成预览', ok: false },
   ];
   return (
     <ol className="flex items-center gap-2 text-sm flex-wrap">
@@ -128,6 +124,9 @@ function StepUpload({ onNext }: { onNext: () => void }) {
   const { photos, addPhotos, removePhoto, setPhotos } = useDraft();
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  // 拖拽排序：记录"正在拖动的照片 id"与"悬停在其上方的照片 id"
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
 
   async function onFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -149,6 +148,18 @@ function StepUpload({ onNext }: { onNext: () => void }) {
     }
   }
 
+  /** 把 srcId 移动到 targetId 所在位置（targetId 之前/之后由相对顺序决定） */
+  function reorder(srcId: string, targetId: string) {
+    if (srcId === targetId) return;
+    const from = photos.findIndex((p) => p.id === srcId);
+    const to = photos.findIndex((p) => p.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = photos.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setPhotos(next);
+  }
+
   const canNext = photos.length >= 6;
 
   return (
@@ -158,6 +169,7 @@ function StepUpload({ onNext }: { onNext: () => void }) {
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
+          // 缩略图内部排序时也可能冒泡到这里，但 dataTransfer.files 为空，下面函数会早退
           onFiles(e.dataTransfer.files);
         }}
       >
@@ -184,7 +196,8 @@ function StepUpload({ onNext }: { onNext: () => void }) {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm text-neutral-600">
-              已选 <span className="font-bold text-neutral-900">{photos.length}</span> 张
+              已选 <span className="font-bold text-neutral-900">{photos.length}</span> 张 ·
+              <span className="ml-1 text-neutral-400">拖动缩略图可调整顺序</span>
               {photos.length > 60 && <span className="text-rose">（已超上限，会保留前 60 张）</span>}
             </div>
             <button
@@ -195,17 +208,59 @@ function StepUpload({ onNext }: { onNext: () => void }) {
             </button>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-            {photos.map((p) => (
-              <div key={p.id} className="relative aspect-square group overflow-hidden rounded">
-                <img src={p.src} className="h-full w-full object-cover" alt="" />
-                <button
-                  onClick={() => removePhoto(p.id)}
-                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs opacity-0 group-hover:opacity-100 transition"
+            {photos.map((p, i) => {
+              const isDragging = dragId === p.id;
+              const isOver = overId === p.id && dragId !== p.id;
+              return (
+                <div
+                  key={p.id}
+                  draggable
+                  onDragStart={(e) => {
+                    setDragId(p.id);
+                    // Firefox 需要 setData 才能发起拖拽
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', p.id);
+                  }}
+                  onDragOver={(e) => {
+                    // 阻止冒泡到上传 label（否则会被当成"文件落在上传区"）
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragId && dragId !== p.id) setOverId(p.id);
+                  }}
+                  onDragLeave={(e) => {
+                    e.stopPropagation();
+                    if (overId === p.id) setOverId(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (dragId) reorder(dragId, p.id);
+                    setDragId(null);
+                    setOverId(null);
+                  }}
+                  onDragEnd={() => {
+                    setDragId(null);
+                    setOverId(null);
+                  }}
+                  className={`relative aspect-square group overflow-hidden rounded cursor-grab active:cursor-grabbing transition ${
+                    isDragging ? 'opacity-40 scale-95' : ''
+                  } ${isOver ? 'ring-2 ring-rose ring-offset-1' : ''}`}
                 >
-                  ×
-                </button>
-              </div>
-            ))}
+                  <img src={p.src} className="h-full w-full object-cover pointer-events-none" alt="" />
+                  {/* 左上角序号：帮助用户理解"照片顺序即画册顺序" */}
+                  <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/55 text-white text-[10px] leading-none">
+                    {i + 1}
+                  </div>
+                  <button
+                    onClick={() => removePhoto(p.id)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs opacity-0 group-hover:opacity-100 transition"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -223,47 +278,7 @@ function StepUpload({ onNext }: { onNext: () => void }) {
   );
 }
 
-// ————— Step 2: 信息 —————
-function StepInfo({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
-  const { babyName, setBabyName, dateRange, setDateRange } = useDraft();
-  return (
-    <div className="max-w-md space-y-5 bg-white/70 backdrop-blur rounded-2xl p-6">
-      <h2 className="font-display text-xl font-bold">填写画册信息</h2>
-      <div>
-        <label className="block text-sm text-neutral-600 mb-1">宝宝姓名 / 昵称 *</label>
-        <input
-          value={babyName}
-          onChange={(e) => setBabyName(e.target.value)}
-          placeholder="例如：小豆包"
-          className="w-full px-4 py-2.5 rounded-lg border border-neutral-200 focus:border-rose focus:ring-0 outline-none bg-white"
-        />
-      </div>
-      <div>
-        <label className="block text-sm text-neutral-600 mb-1">画册时间范围</label>
-        <input
-          value={dateRange}
-          onChange={(e) => setDateRange(e.target.value)}
-          placeholder="例如：2025.01 - 2026.04"
-          className="w-full px-4 py-2.5 rounded-lg border border-neutral-200 focus:border-rose focus:ring-0 outline-none bg-white"
-        />
-      </div>
-      <div className="flex justify-between pt-2">
-        <button onClick={onBack} className="px-5 py-2 rounded-full border border-neutral-200">
-          上一步
-        </button>
-        <button
-          disabled={!babyName}
-          onClick={onNext}
-          className="px-6 py-2.5 rounded-full bg-neutral-900 text-white disabled:opacity-40"
-        >
-          下一步
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ————— Step 3: 模板 —————
+// ————— Step 2: 模板 —————
 function StepTemplate({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
   const { templateId, setTemplateId } = useDraft();
   const { allTemplates } = useTemplateRegistry();
@@ -353,13 +368,13 @@ function StepTemplate({ onBack, onNext }: { onBack: () => void; onNext: () => vo
   );
 }
 
-// ————— Step 4: 生成 —————
+// ————— Step 3: 生成 —————
 function StepGenerate({
   onBack,
   onDone,
 }: {
   onBack: () => void;
-  onDone: (book: Book) => void;
+  onDone: (book: Book, opts?: { edit?: boolean }) => void;
 }) {
   const { photos, babyName, dateRange, templateId } = useDraft();
   const { getTemplate } = useTemplateRegistry();
@@ -385,7 +400,7 @@ function StepGenerate({
         });
         const book: Book = {
           id: `book_${Date.now().toString(36)}`,
-          title: babyName ? `${babyName}的画册` : '我的画册',
+          title: babyName ? `${babyName}的画册` : tpl.defaultTitle || '我的画册',
           babyName,
           dateRange,
           templateId: tpl.id,
@@ -432,6 +447,12 @@ function StepGenerate({
             换个模板
           </button>
           <button
+            onClick={() => onDone(preview, { edit: true })}
+            className="px-5 py-2.5 rounded-full border border-rose text-rose hover:bg-rose/5 text-sm"
+          >
+            ✎ 编辑画册
+          </button>
+          <button
             onClick={() => onDone(preview)}
             className="px-5 py-2.5 rounded-full bg-neutral-900 text-white text-sm"
           >
@@ -449,7 +470,7 @@ function StepGenerate({
       />
 
       <div className="text-center text-xs text-neutral-500">
-        预览模式 · 保存后可在「我的画册」里继续翻阅，并支持下载 PDF / 打印
+        预览模式 · 点击「编辑画册」可修改每页文字、标题与副标题；保存后可继续翻阅并下载 PDF / 打印
       </div>
     </div>
   );

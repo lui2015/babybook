@@ -165,6 +165,7 @@ export function BookFlip({
                   template={template}
                   babyName={book.babyName}
                   dateRange={book.dateRange}
+                  photoFrameColor={book.theme?.photoFrameColor ?? null}
                 />
               </div>
 
@@ -182,6 +183,7 @@ export function BookFlip({
                       template={template}
                       babyName={book.babyName}
                       dateRange={book.dateRange}
+                      photoFrameColor={book.theme?.photoFrameColor ?? null}
                     />
                   </div>
                   {/* 背面（翻过去后朝向观众） */}
@@ -192,6 +194,7 @@ export function BookFlip({
                       template={template}
                       babyName={book.babyName}
                       dateRange={book.dateRange}
+                      photoFrameColor={book.theme?.photoFrameColor ?? null}
                     />
                   </div>
                   {/* 翻页时飘过页面的柔和高光/阴影（增强质感） */}
@@ -233,6 +236,7 @@ export function BookFlip({
                 template={template}
                 babyName={book.babyName}
                 dateRange={book.dateRange}
+                photoFrameColor={book.theme?.photoFrameColor ?? null}
               />
             </button>
           ))}

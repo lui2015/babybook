@@ -119,3 +119,43 @@ body {
   background-image: radial-gradient(rgba(0, 0, 0, 0.08) 1px, transparent 1px);
   background-size: 14px 14px;
 }
+
+/* ============================================================
+ *  编辑器预览页：点击照片替换
+ *  在 <PageView> 外层加 .pv-editable 时，所有 <img> 上 hover 变为可点击态
+ *  并浮现"点击替换"角标；实际替换逻辑由上层事件委托处理。
+ * ============================================================ */
+.pv-editable img {
+  cursor: pointer;
+  transition: filter 150ms ease, box-shadow 150ms ease, outline-color 150ms ease;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.pv-editable img:hover {
+  filter: brightness(0.82);
+  outline-color: rgba(225, 29, 72, 0.9); /* rose-600 */
+  box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.55) inset;
+}
+/* hover 时在图片所在容器右上角悬浮一个"↻ 替换"小角标
+   借助父元素的 :hover（img 的直接父元素通常是 PhotoFrame 的 overflow-hidden wrapper） */
+.pv-editable img:hover::after {
+  /* img 是 replaced element，伪元素不生效，这里作为占位；真实角标由容器实现 */
+}
+
+/* 选中态：
+   - 根容器挂 .pv-has-selection 时，非选中的图片轻微降亮，弱化背景
+   - 选中的 <img> 加上 rose 描边 + 外发光，和 hover 样式区分开
+   选中标记由 PageView 的 effect 在运行时写入 img.dataset.selected */
+.pv-has-selection img {
+  filter: brightness(0.72) saturate(0.85);
+  transition: filter 150ms ease, outline-color 150ms ease, box-shadow 150ms ease;
+}
+.pv-editable img[data-selected='true'],
+.pv-editable img[data-selected='true']:hover {
+  filter: none;
+  outline: 3px solid #e11d48; /* rose-600 */
+  outline-offset: -3px;
+  box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.35),
+    0 6px 24px rgba(225, 29, 72, 0.35);
+}
+

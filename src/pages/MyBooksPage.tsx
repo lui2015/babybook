@@ -84,6 +84,7 @@ function BookCard({ book, onDelete }: { book: Book; onDelete: () => void }) {
             template={template}
             babyName={book.babyName}
             dateRange={book.dateRange}
+            photoFrameColor={book.theme?.photoFrameColor ?? null}
           />
         ) : (
           <div className="h-full bg-neutral-100 flex items-center justify-center text-neutral-400">

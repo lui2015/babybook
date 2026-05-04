@@ -1,7 +1,131 @@
-import type { CSSProperties } from 'react';
-import { memo, useState } from 'react';
-import type { BookPage, Photo, Template, TemplateStyle } from '../types';
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useRef, useState } from 'react';
+import type { BookPage, Photo, PhotoShape, Template, TemplateStyle } from '../types';
 import { defaultVariantId } from '../layoutVariants';
+
+/**
+ * 当前页每张照片的"形状"映射，由 PageViewInner 注入。
+ * PhotoFrame 通过 context 自动读取自己对应的 shape —— 避免改动所有版式函数签名。
+ */
+const PhotoShapeContext = createContext<(photo: Photo) => PhotoShape | undefined>(() => undefined);
+
+/**
+ * 全页统一的"图片相框颜色覆盖"，由 PageViewInner 注入（值来自 book.theme.photoFrameColor）。
+ * null / undefined 表示跟随模板默认；十六进制字符串则强制覆盖所有 style 的主边色。
+ * 同样通过 context 读取，避免改动所有版式 → PhotoFrame 的调用签名。
+ */
+const PhotoFrameColorContext = createContext<string | null | undefined>(undefined);
+
+/* ============================================================
+ *  照片形状工具
+ *  - 'rect'    : 保持版式容器比例，不裁剪（默认）
+ *  - 'rounded' : 在 rect 基础上圆角
+ *  - 'circle'  : 圆（强制 1:1）
+ *  - 'heart' / 'star' / 'hexagon' : clip-path 异形（强制 1:1）
+ *  说明：
+ *    所有版式里的照片块都把"绝对定位/尺寸"交给外层容器，
+ *    PhotoFrame 负责 100%×100% 铺满容器并"按形状"对内容 wrapper 做遮罩。
+ *    对于非矩形形状（circle/heart/star/hexagon）必须 1:1，
+ *    否则图案会被拉扁。此时 ShapeMask 会把自身收成正方形并居中，
+ *    保证容器为长方形时形状仍然标准。
+ * ============================================================ */
+const CLIP_PATH_MAP: Partial<Record<PhotoShape, string>> = {
+  // 心形（来自通用 SVG path，常见稳定写法）
+  heart:
+    "path('M 100 190 C 50 150 15 120 15 80 C 15 50 40 25 70 25 C 85 25 95 35 100 50 C 105 35 115 25 130 25 C 160 25 185 50 185 80 C 185 120 150 150 100 190 Z')",
+  // 五角星
+  star: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+  // 正六边形（flat-top）
+  hexagon: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+};
+
+/** 是否需要强制 1:1 的形状 */
+function shapeForcesSquare(shape?: PhotoShape): boolean {
+  return shape === 'circle' || shape === 'heart' || shape === 'star' || shape === 'hexagon';
+}
+
+/**
+ * 判断一个字符串是否为内置 TemplateStyle；
+ * cover / single / single-portrait 的 variantOverride 允许直接复用这些 style 作为骨架选项，
+ * 额外的 variant（如 'poster' / 'filmstrip'）走各 layout 专属分支。
+ */
+const TEMPLATE_STYLE_SET: ReadonlySet<TemplateStyle> = new Set<TemplateStyle>([
+  'watercolor',
+  'cartoon',
+  'minimal',
+  'vintage',
+  'festival-cn',
+  'festival-xmas',
+]);
+function isTemplateStyle(v: unknown): v is TemplateStyle {
+  return typeof v === 'string' && TEMPLATE_STYLE_SET.has(v as TemplateStyle);
+}
+
+/**
+ * 把任意内容（img / div）按形状裁切。
+ * - rect: 不裁切，直接返回子节点
+ * - rounded: 加圆角
+ * - circle: 圆形 + 强制 1:1
+ * - heart/star/hexagon: clip-path + 强制 1:1
+ *
+ * 当父容器不是 1:1 时，ShapeMask 会把自己 inset 到正方形尺寸并居中。
+ */
+function ShapeMask({
+  shape,
+  children,
+  extraStyle,
+  extraClassName = '',
+}: {
+  shape?: PhotoShape;
+  children: ReactNode;
+  extraStyle?: CSSProperties;
+  extraClassName?: string;
+}) {
+  if (!shape || shape === 'rect') {
+    return (
+      <div className={`w-full h-full overflow-hidden ${extraClassName}`} style={extraStyle}>
+        {children}
+      </div>
+    );
+  }
+  if (shape === 'rounded') {
+    return (
+      <div
+        className={`w-full h-full overflow-hidden ${extraClassName}`}
+        style={{ borderRadius: '18%', ...extraStyle }}
+      >
+        {children}
+      </div>
+    );
+  }
+  // 非矩形异形：强制 1:1 + 居中（aspect-square 配合 max-w/max-h 实现）
+  const clip = CLIP_PATH_MAP[shape];
+  const baseStyle: CSSProperties = {
+    aspectRatio: '1 / 1',
+    borderRadius: shape === 'circle' ? '50%' : undefined,
+    clipPath: clip,
+    WebkitClipPath: clip,
+    ...extraStyle,
+  };
+  // 外层用 flex 居中 + 内层自适应为正方形（取 min(宽, 高)）
+  return (
+    <div className={`w-full h-full flex items-center justify-center ${extraClassName}`}>
+      <div
+        className="overflow-hidden"
+        style={{
+          // 让正方形取父容器宽高的较小者
+          height: '100%',
+          width: 'auto',
+          maxWidth: '100%',
+          maxHeight: '100%',
+          ...baseStyle,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 interface Props {
   page: BookPage;
@@ -12,6 +136,22 @@ interface Props {
   /** 纯展示模式下基准宽度，用于 html2canvas 导出 */
   width?: number;
   height?: number;
+  /**
+   * 编辑器模式：点击页面内的照片时触发"选中"；
+   * 点击页面空白区域时以 null 触发，用于取消选中。
+   * 未传该回调时，页面图片不响应点击（纯展示）。
+   */
+  onSelectPhoto?: (photoId: string | null) => void;
+  /**
+   * 当前被选中的照片 id（来自外部状态）；被选中的照片会高亮描边，
+   * 其他照片略微降亮，提示用户下一步可以在图库里点一张来替换它。
+   */
+  selectedPhotoId?: string | null;
+  /**
+   * 图片相框颜色覆盖（来自 book.theme.photoFrameColor）。
+   * null / undefined 表示跟随模板默认；十六进制串则覆盖所有 style 的主边色。
+   */
+  photoFrameColor?: string | null;
 }
 
 /**
@@ -19,12 +159,31 @@ interface Props {
  * 按 template.style 走完全不同的视觉骨架：
  *   watercolor / cartoon / minimal / vintage / festival-cn / festival-xmas
  */
-function PageViewInner({ page, photos, template, babyName, dateRange, width, height }: Props) {
+function PageViewInner({ page, photos, template, babyName, dateRange, width, height, onSelectPhoto, selectedPhotoId, photoFrameColor }: Props) {
   const photoMap = new Map(photos.map((p) => [p.id, p]));
+  // src → photoId 反查表：点击 <img> 时靠 src 反查 photoId（浏览器 img.src 会返回绝对 URL，
+  // 但 dataURL/blob/相对路径我们都完整保存在 Photo.src 里，所以用 endsWith 做兜底匹配）。
+  const srcToId = new Map(photos.map((p) => [p.src, p.id]));
   // 只保留 src 非空的有效照片，避免出现空白相框
   const pagePhotos = page.photoIds
     .map((id) => photoMap.get(id))
     .filter((p): p is Photo => !!p && !!p.src);
+
+  // 维护"有效照片 → 原始 slot 索引"的映射，这样取 shape 时能对上 page.photoShapes
+  const slotOfPagePhoto = new Map<string, number>();
+  page.photoIds.forEach((id, i) => {
+    const ph = photoMap.get(id);
+    if (ph && ph.src && !slotOfPagePhoto.has(ph.id)) {
+      slotOfPagePhoto.set(ph.id, i);
+    }
+  });
+  /** 取给定 photo 的形状（来自 page.photoShapes 在 photoIds 中的索引）。 */
+  const shapeFor = (photo?: Photo): PhotoShape | undefined => {
+    if (!photo) return undefined;
+    const slot = slotOfPagePhoto.get(photo.id);
+    if (slot == null) return undefined;
+    return page.photoShapes?.[slot];
+  };
 
   const { colors, fontFamily, backgroundPattern } = template;
 
@@ -73,15 +232,69 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
     aspectRatio: width && height ? undefined : '3 / 4',
   };
 
+  const editable = !!onSelectPhoto;
+
+  // 编辑模式：点击图片 → onSelectPhoto(photoId)；点击空白 → onSelectPhoto(null)
+  const handleImgClick = editable
+    ? (e: ReactMouseEvent<HTMLDivElement>) => {
+        const target = e.target as HTMLElement;
+        const imgEl = target.closest('img') as HTMLImageElement | null;
+        if (!imgEl) {
+          // 点击的是空白区域：取消选中
+          onSelectPhoto!(null);
+          return;
+        }
+        // 优先用 dataset.photoId（精准），再退回到按 src 反查
+        const datasetId = imgEl.dataset.photoId;
+        let pid = datasetId;
+        if (!pid) {
+          // img.src 在浏览器里可能被解析成绝对 URL；dataURL/blob: 不会变
+          const rawSrc = imgEl.getAttribute('src') ?? '';
+          pid = srcToId.get(rawSrc) ?? srcToId.get(imgEl.src);
+        }
+        if (!pid) {
+          onSelectPhoto!(null);
+          return;
+        }
+        e.stopPropagation();
+        onSelectPhoto!(pid);
+      }
+    : undefined;
+
+  // 选中态：若有 selectedPhotoId，则根页面容器挂一个 data 属性，
+  // 配合 CSS 让选中图片高亮、其他图片降亮。
+  const selectedAttr = selectedPhotoId ?? undefined;
+
+  // 把"被选中"这个状态直接标注到对应 <img> 节点上（data-selected="true"），
+  // 以便 CSS 用 [data-selected] 选择器命中它，无需让每个版式子组件都感知选中 id。
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const imgs = root.querySelectorAll<HTMLImageElement>('img[data-photo-id]');
+    imgs.forEach((im) => {
+      if (selectedAttr && im.dataset.photoId === selectedAttr) {
+        im.dataset.selected = 'true';
+      } else {
+        delete im.dataset.selected;
+      }
+    });
+  });
+
   return (
     <div
-      className="relative overflow-hidden shadow-book rounded-md"
+      ref={rootRef}
+      className={`relative overflow-hidden shadow-book rounded-md ${editable ? 'pv-editable' : ''}${selectedAttr ? ' pv-has-selection' : ''}`}
       style={pageStyle}
+      onClick={handleImgClick}
+      data-selected-photo-id={selectedAttr}
     >
       {/* 风格化装饰层 */}
       <StyleDecorations template={template} />
 
       {/* 按版式渲染（使用降级后的 resolvedLayout，保证永不空白） */}
+      <PhotoFrameColorContext.Provider value={photoFrameColor ?? null}>
+      <PhotoShapeContext.Provider value={shapeFor}>
       {resolvedLayout === 'cover' && (
         <CoverLayout
           photo={pagePhotos[0]}
@@ -90,11 +303,12 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
           babyName={babyName}
           dateRange={dateRange}
           template={template}
+          variantOverride={page.variant}
         />
       )}
 
       {resolvedLayout === 'single' && pagePhotos[0] && (
-        <SingleLayout photo={pagePhotos[0]} caption={page.caption} template={template} />
+        <SingleLayout photo={pagePhotos[0]} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
 
       {resolvedLayout === 'single-portrait' && pagePhotos[0] && (
@@ -102,28 +316,31 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
           photo={pagePhotos[0]}
           caption={page.caption}
           template={template}
+          variantOverride={page.variant}
         />
       )}
 
       {resolvedLayout === 'double' && pagePhotos.length >= 2 && (
-        <DoubleLayout photos={pagePhotos} caption={page.caption} template={template} />
+        <DoubleLayout photos={pagePhotos} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
 
       {resolvedLayout === 'triple' && pagePhotos.length >= 3 && (
-        <TripleLayout photos={pagePhotos} caption={page.caption} template={template} />
+        <TripleLayout photos={pagePhotos} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
 
       {resolvedLayout === 'grid4' && pagePhotos.length >= 4 && (
-        <Grid4Layout photos={pagePhotos} caption={page.caption} template={template} />
+        <Grid4Layout photos={pagePhotos} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
 
       {resolvedLayout === 'grid5' && pagePhotos.length >= 5 && (
-        <Grid5Layout photos={pagePhotos} caption={page.caption} template={template} />
+        <Grid5Layout photos={pagePhotos} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
 
       {resolvedLayout === 'grid6' && pagePhotos.length >= 6 && (
-        <Grid6Layout photos={pagePhotos} caption={page.caption} template={template} />
+        <Grid6Layout photos={pagePhotos} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
+      </PhotoShapeContext.Provider>
+      </PhotoFrameColorContext.Provider>
 
       {resolvedLayout === 'text' && <TextLayout page={fallbackPage} template={template} />}
 
@@ -146,7 +363,10 @@ export const PageView = memo(PageViewInner, (prev, next) => {
     prev.babyName === next.babyName &&
     prev.dateRange === next.dateRange &&
     prev.width === next.width &&
-    prev.height === next.height
+    prev.height === next.height &&
+    prev.onSelectPhoto === next.onSelectPhoto &&
+    prev.selectedPhotoId === next.selectedPhotoId &&
+    prev.photoFrameColor === next.photoFrameColor
   );
 });
 
@@ -336,6 +556,7 @@ function SafeImg({
   className = '',
   style,
   fit = 'cover',
+  photoId,
 }: {
   src: string;
   alt?: string;
@@ -343,6 +564,7 @@ function SafeImg({
   className?: string;
   style?: CSSProperties;
   fit?: 'cover' | 'contain';
+  photoId?: string;
 }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) {
@@ -360,6 +582,7 @@ function SafeImg({
       loading="eager"
       decoding="async"
       draggable={false}
+      data-photo-id={photoId}
       className={`h-full w-full ${objectFitClass} ${className}`}
       style={style}
       onError={() => setFailed(true)}
@@ -382,6 +605,7 @@ function PhotoFrame({
   rotate = 0,
   className = '',
   fit = 'cover',
+  shape: shapeProp,
 }: {
   photo: Photo;
   template: Template;
@@ -392,8 +616,38 @@ function PhotoFrame({
    * 'contain'：完整显示照片、不变形不裁切，多余空间由相框纸色填充（适合水彩等对"形状舒服"要求极高的风格）
    */
   fit?: 'cover' | 'contain';
+  /**
+   * 用户对该 slot 指定的相框形状（rect/rounded/circle/heart/star/hexagon）。
+   * 不传则从 PhotoShapeContext 自动读取（避免每处版式都手写）。
+   * - rect / undefined：保持原 style 相框
+   * - rounded：在原 style 相框外再套一层大圆角 mask，兼容所有风格
+   * - 异形（circle/heart/star/hexagon）：不走 style 相框（polaroid 白边等会破形），
+   *   直接在正方形区域内用 clip-path 对照片本身做裁切
+   */
+  shape?: PhotoShape;
 }) {
   const { style, colors } = template;
+  const shapeFromCtx = useContext(PhotoShapeContext);
+  const shape = shapeProp ?? shapeFromCtx(photo);
+  // 用户对图片边框颜色的覆盖（优先级高于 style 默认值）
+  const frameColorOverride = useContext(PhotoFrameColorContext) || null;
+
+  // —— 异形：不套 style 相框，直接对 img 整形（保证形状干净） ——
+  if (shape && shapeForcesSquare(shape)) {
+    return (
+      <div
+        className={`${className}`}
+        style={{ transform: rotate ? `rotate(${rotate}deg)` : undefined }}
+      >
+        <ShapeMask shape={shape}>
+          <SafeImg src={photo.src} template={template} fit="cover" photoId={photo.id} />
+        </ShapeMask>
+      </div>
+    );
+  }
+
+  // —— 原 style 相框 ——
+  let frame: ReactNode;
 
   if (style === 'vintage') {
     // Polaroid：厚米白边 + 轻微旋转（深色纸也适配）
@@ -401,10 +655,11 @@ function PhotoFrame({
       template.colors.paper.startsWith('#1') ||
       template.colors.paper.startsWith('#2') ||
       template.colors.paper.startsWith('#3');
-    const frameBg = isDarkPaper ? '#F2E7D0' : '#FFFEF7';
-    return (
+    // 用户覆盖 > 深/浅纸自适应
+    const frameBg = frameColorOverride ?? (isDarkPaper ? '#F2E7D0' : '#FFFEF7');
+    frame = (
       <div
-        className={`overflow-hidden ${className}`}
+        className={`overflow-hidden w-full h-full`}
         style={{
           background: frameBg,
           padding: '8px 8px 28px 8px',
@@ -421,37 +676,34 @@ function PhotoFrame({
             loading="eager"
             decoding="async"
             draggable={false}
+            data-photo-id={photo.id}
             className="h-full w-full object-cover"
             style={{ filter: 'sepia(0.25) contrast(0.95) saturate(0.9)' }}
           />
         </div>
       </div>
     );
-  }
-
-  if (style === 'cartoon') {
-    // 厚彩色圆角边
-    return (
+  } else if (style === 'cartoon') {
+    const mainBorder = frameColorOverride ?? colors.primary;
+    frame = (
       <div
-        className={`overflow-hidden rounded-3xl ${className}`}
+        className={`overflow-hidden rounded-3xl w-full h-full`}
         style={{
-          border: `4px solid ${colors.primary}`,
+          border: `4px solid ${mainBorder}`,
           boxShadow: `0 4px 0 ${colors.accent}`,
         }}
       >
-        <SafeImg src={photo.src} template={template} />
+        <SafeImg src={photo.src} template={template} photoId={photo.id} />
       </div>
     );
-  }
-
-  if (style === 'watercolor') {
-    // 柔和圆角长方形 + 纸质白边 + 淡彩投影（水彩画纸贴纸感）
-    // fit='contain' 时用纸色背景补白，避免把普通照片拉变形
-    return (
+  } else if (style === 'watercolor') {
+    // watercolor 的"边"是 padding 露出的纸色。用户覆盖时作为 padding 色使用
+    const paddingBg = frameColorOverride ?? colors.paper;
+    frame = (
       <div
-        className={`overflow-hidden rounded-2xl ${className}`}
+        className={`overflow-hidden rounded-2xl w-full h-full`}
         style={{
-          background: colors.paper,
+          background: paddingBg,
           padding: '6px',
           boxShadow: `0 6px 18px ${colors.primary}33, 0 0 0 1px ${colors.accent}22`,
           transform: rotate ? `rotate(${rotate}deg)` : undefined,
@@ -459,55 +711,67 @@ function PhotoFrame({
       >
         <div
           className="w-full h-full overflow-hidden rounded-xl"
-          style={{ background: fit === 'contain' ? colors.paper : undefined }}
+          style={{ background: fit === 'contain' ? paddingBg : undefined }}
         >
-          <SafeImg src={photo.src} template={template} fit={fit} />
+          <SafeImg src={photo.src} template={template} fit={fit} photoId={photo.id} />
         </div>
       </div>
     );
-  }
-
-  if (style === 'festival-cn') {
-    return (
+  } else if (style === 'festival-cn') {
+    const mainBorder = frameColorOverride ?? colors.primary;
+    frame = (
       <div
-        className={`overflow-hidden ${className}`}
+        className={`overflow-hidden w-full h-full`}
         style={{
-          border: `3px solid ${colors.primary}`,
+          border: `3px solid ${mainBorder}`,
           padding: '3px',
           background: colors.paper,
           boxShadow: `0 0 0 1px ${colors.accent}`,
         }}
       >
-        <SafeImg src={photo.src} template={template} />
+        <SafeImg src={photo.src} template={template} photoId={photo.id} />
       </div>
     );
-  }
-
-  if (style === 'festival-xmas') {
-    return (
+  } else if (style === 'festival-xmas') {
+    const mainBorder = frameColorOverride ?? colors.primary;
+    frame = (
       <div
-        className={`overflow-hidden rounded-lg ${className}`}
+        className={`overflow-hidden rounded-lg w-full h-full`}
         style={{
-          border: `3px solid ${colors.primary}`,
+          border: `3px solid ${mainBorder}`,
           boxShadow: `0 2px 0 ${colors.accent}`,
         }}
       >
-        <SafeImg src={photo.src} template={template} />
+        <SafeImg src={photo.src} template={template} photoId={photo.id} />
+      </div>
+    );
+  } else {
+    // minimal 默认：极细灰边，无圆角；用户覆盖时直接整色实边（更显眼）
+    const borderStyle = frameColorOverride
+      ? `1px solid ${frameColorOverride}`
+      : `1px solid ${colors.accent}55`;
+    frame = (
+      <div
+        className={`overflow-hidden w-full h-full`}
+        style={{ border: borderStyle }}
+      >
+        <SafeImg src={photo.src} template={template} photoId={photo.id} />
       </div>
     );
   }
 
-  // minimal 默认：极细灰边，无圆角
-  return (
-    <div
-      className={`overflow-hidden ${className}`}
-      style={{
-        border: `1px solid ${colors.accent}55`,
-      }}
-    >
-      <SafeImg src={photo.src} template={template} />
-    </div>
-  );
+  // rounded：在整个 style 相框外再套一层大圆角 mask
+  if (shape === 'rounded') {
+    return (
+      <div className={className} style={{ overflow: 'hidden', borderRadius: '18%' }}>
+        {frame}
+      </div>
+    );
+  }
+
+  // rect / undefined：保持原有结构，但要把 className 透给最外层
+  // 对需要 rotate 的 vintage/watercolor，rotate 已在内部处理，这里仅套 className
+  return <div className={className}>{frame}</div>;
 }
 
 /** 按风格给 caption 包装：小贴纸 / 对话气泡 / 打字机 / 衬线... */
@@ -634,6 +898,7 @@ function CoverLayout({
   babyName,
   dateRange,
   template,
+  variantOverride,
 }: {
   photo?: Photo;
   title: string;
@@ -641,8 +906,154 @@ function CoverLayout({
   babyName?: string;
   dateRange?: string;
   template: Template;
+  variantOverride?: string;
 }) {
-  const { style, colors, fontFamily } = template;
+  const { colors, fontFamily } = template;
+  // 封面的骨架来源：
+  //   - variantOverride === undefined：沿用模板 style（向后兼容）
+  //   - 'minimal' | 'watercolor' | 'cartoon' | 'vintage' | 'festival-cn' | 'festival-xmas'
+  //       → 强制用对应 style 骨架（即使当前模板 style 不同，也能切到这个样式）
+  //   - 'poster' | 'filmstrip'：CoverLayout 专属全新样式
+  const style: TemplateStyle = isTemplateStyle(variantOverride)
+    ? variantOverride
+    : template.style;
+  const extraVariant: string | undefined =
+    variantOverride && !isTemplateStyle(variantOverride) ? variantOverride : undefined;
+  // 封面也支持形状编辑（slot 0），minimal/vintage 里直写 <img> 的大图同样生效
+  const shapeFromCtx = useContext(PhotoShapeContext);
+  const coverShape = photo ? shapeFromCtx(photo) : undefined;
+
+  /* poster：超大标题铺满 + 底部一行脚注 + 小照片徽章 */
+  if (extraVariant === 'poster') {
+    return (
+      <div
+        className="h-full w-full flex flex-col p-8 relative overflow-hidden"
+        style={{ background: colors.paper }}
+      >
+        <div
+          className="absolute inset-0 opacity-10"
+          style={{
+            background: `radial-gradient(circle at 20% 30%, ${colors.primary} 0%, transparent 45%), radial-gradient(circle at 80% 80%, ${colors.accent} 0%, transparent 45%)`,
+          }}
+        />
+        <div className="relative z-10 flex-1 flex flex-col justify-center">
+          <div
+            className="text-[10px] tracking-[0.5em] mb-4"
+            style={{ color: colors.accent, fontFamily: fontFamily.title }}
+          >
+            BABY · POSTER · 01
+          </div>
+          <h1
+            className="font-bold leading-[0.95]"
+            style={{
+              fontFamily: fontFamily.title,
+              color: colors.primary,
+              fontSize: '64px',
+              wordBreak: 'break-word',
+            }}
+          >
+            {title}
+          </h1>
+          <div
+            className="mt-4 text-sm max-w-[75%] leading-relaxed"
+            style={{ color: colors.text, fontFamily: fontFamily.title }}
+          >
+            {subtitle}
+          </div>
+        </div>
+        {photo && (
+          <div
+            className="absolute bottom-8 right-8 w-24 h-24 overflow-hidden rounded-full shadow-lg z-10"
+            style={{ border: `4px solid ${colors.paper}`, boxShadow: `0 0 0 2px ${colors.primary}` }}
+          >
+            <ShapeMask shape={coverShape}>
+              <SafeImg src={photo.src} template={template} photoId={photo.id} />
+            </ShapeMask>
+          </div>
+        )}
+        <div
+          className="relative z-10 flex items-end justify-between pt-6 border-t"
+          style={{ borderColor: `${colors.primary}33` }}
+        >
+          <div className="text-xs" style={{ color: colors.text, fontFamily: fontFamily.title }}>
+            {babyName && <span className="font-semibold">{babyName}</span>}
+            {babyName && dateRange && <span className="mx-2 opacity-40">·</span>}
+            {dateRange && <span className="opacity-70">{dateRange}</span>}
+          </div>
+          <div className="text-[10px] tracking-[0.3em] opacity-50">NO · 001</div>
+        </div>
+      </div>
+    );
+  }
+
+  /* filmstrip：顶部胶片条 + 中间超大主图 + 底部横向小条 */
+  if (extraVariant === 'filmstrip') {
+    return (
+      <div
+        className="h-full w-full flex flex-col relative overflow-hidden"
+        style={{ background: '#1a1a1a' }}
+      >
+        {/* 顶部齿孔 */}
+        <div
+          className="h-3 shrink-0"
+          style={{
+            background: `repeating-linear-gradient(90deg, #fff 0 6px, transparent 6px 14px)`,
+            opacity: 0.9,
+          }}
+        />
+        <div className="flex-1 relative">
+          {photo ? (
+            <ShapeMask shape={coverShape}>
+              <img
+                src={photo.src}
+                alt=""
+                loading="eager"
+                decoding="async"
+                draggable={false}
+                data-photo-id={photo.id}
+                className="h-full w-full object-cover"
+              />
+            </ShapeMask>
+          ) : (
+            <CoverPlaceholder template={template} title={title} />
+          )}
+          <div
+            className="absolute inset-0"
+            style={{
+              background: `linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.7) 100%)`,
+            }}
+          />
+          <div className="absolute bottom-4 left-5 right-5 text-white">
+            <div
+              className="text-[10px] tracking-[0.4em] opacity-70 mb-1"
+              style={{ fontFamily: fontFamily.title }}
+            >
+              FILM · REEL · 001
+            </div>
+            <h1
+              className="text-3xl font-bold leading-tight"
+              style={{ fontFamily: fontFamily.title }}
+            >
+              {title}
+            </h1>
+            <div className="text-xs mt-1 opacity-80" style={{ fontFamily: fontFamily.title }}>
+              {babyName}
+              {babyName && dateRange && ' · '}
+              {dateRange}
+            </div>
+          </div>
+        </div>
+        {/* 底部齿孔 */}
+        <div
+          className="h-3 shrink-0"
+          style={{
+            background: `repeating-linear-gradient(90deg, #fff 0 6px, transparent 6px 14px)`,
+            opacity: 0.9,
+          }}
+        />
+      </div>
+    );
+  }
 
   /* minimal：日系杂志 —— 超大 VOL 编号 + 黑红撞色 */
   if (style === 'minimal') {
@@ -704,7 +1115,9 @@ function CoverLayout({
               className="w-36 h-44 overflow-hidden shrink-0"
               style={{ border: `2px solid ${colors.primary}` }}
             >
-              <SafeImg src={photo.src} template={template} />
+              <ShapeMask shape={coverShape}>
+                <SafeImg src={photo.src} template={template} photoId={photo.id} />
+              </ShapeMask>
             </div>
           )}
           <div className="flex-1 pb-1">
@@ -758,15 +1171,18 @@ function CoverLayout({
 
         <div className="mt-6 flex-1 relative overflow-hidden" style={{ border: `8px solid ${stickerBg}` }}>
           {photo ? (
-            <img
-              src={photo.src}
-              alt=""
-              loading="eager"
-              decoding="async"
-              draggable={false}
-              className="h-full w-full object-cover"
-              style={{ filter: 'sepia(0.35) contrast(0.92) saturate(0.85)' }}
-            />
+            <ShapeMask shape={coverShape}>
+              <img
+                src={photo.src}
+                alt=""
+                loading="eager"
+                decoding="async"
+                draggable={false}
+                data-photo-id={photo.id}
+                className="h-full w-full object-cover"
+                style={{ filter: 'sepia(0.35) contrast(0.92) saturate(0.85)' }}
+              />
+            </ShapeMask>
           ) : (
             <CoverPlaceholder template={template} title={title} />
           )}
@@ -834,7 +1250,9 @@ function CoverLayout({
           }}
         >
           {photo ? (
-            <SafeImg src={photo.src} template={template} />
+            <ShapeMask shape={coverShape}>
+              <SafeImg src={photo.src} template={template} photoId={photo.id} />
+            </ShapeMask>
           ) : (
             <CoverPlaceholder template={template} title={title} />
           )}
@@ -873,7 +1291,9 @@ function CoverLayout({
         >
           <div className="w-full h-full overflow-hidden">
             {photo ? (
-              <SafeImg src={photo.src} template={template} />
+              <ShapeMask shape={coverShape}>
+                <SafeImg src={photo.src} template={template} photoId={photo.id} />
+              </ShapeMask>
             ) : (
               <CoverPlaceholder template={template} title={title} />
             )}
@@ -929,7 +1349,9 @@ function CoverLayout({
           }}
         >
           {photo ? (
-            <SafeImg src={photo.src} template={template} />
+            <ShapeMask shape={coverShape}>
+              <SafeImg src={photo.src} template={template} photoId={photo.id} />
+            </ShapeMask>
           ) : (
             <CoverPlaceholder template={template} title={title} />
           )}
@@ -965,7 +1387,9 @@ function CoverLayout({
     <div className="h-full w-full flex flex-col">
       <div className="flex-[3] overflow-hidden relative">
         {photo ? (
-          <SafeImg src={photo.src} alt="cover" template={template} />
+          <ShapeMask shape={coverShape}>
+            <SafeImg src={photo.src} alt="cover" template={template} photoId={photo.id} />
+          </ShapeMask>
         ) : (
           <CoverPlaceholder template={template} title={title} />
         )}
@@ -1016,8 +1440,76 @@ function CoverLayout({
 /* ============================================================
  *  版式 2：单图大图 —— 每 style 骨架不同（不只有相框差异）
  * ============================================================ */
-function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: string; template: Template }) {
-  const { style, colors, fontFamily } = template;
+function SingleLayout({
+  photo,
+  caption,
+  template,
+  variantOverride,
+}: {
+  photo: Photo;
+  caption?: string;
+  template: Template;
+  variantOverride?: string;
+}) {
+  const { colors, fontFamily } = template;
+  const style: TemplateStyle = isTemplateStyle(variantOverride) ? variantOverride : template.style;
+  const extraVariant: string | undefined =
+    variantOverride && !isTemplateStyle(variantOverride) ? variantOverride : undefined;
+
+  /* fullbleed：满版出血大图，底部半透明字幕条 */
+  if (extraVariant === 'fullbleed') {
+    return (
+      <div className="h-full w-full relative overflow-hidden">
+        <div className="absolute inset-0">
+          <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+        </div>
+        {caption && (
+          <div
+            className="absolute left-0 right-0 bottom-0 px-6 py-3 text-white text-sm leading-relaxed backdrop-blur-[2px]"
+            style={{
+              background: 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.75) 100%)',
+              fontFamily: fontFamily.title,
+            }}
+          >
+            {caption}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* card：居中卡片大图，周围留白 + 细阴影，像相片卡 */
+  if (extraVariant === 'card') {
+    return (
+      <div
+        className="h-full w-full flex items-center justify-center p-8"
+        style={{ background: `${colors.accent}0d` }}
+      >
+        <div
+          className="relative bg-white shadow-xl p-4"
+          style={{ width: '82%', boxShadow: '0 12px 28px rgba(0,0,0,0.15)' }}
+        >
+          <div className="w-full" style={{ aspectRatio: '4 / 5' }}>
+            <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+          </div>
+          {caption && (
+            <div
+              className="mt-3 text-center text-sm leading-relaxed"
+              style={{ color: colors.text, fontFamily: fontFamily.title }}
+            >
+              {caption}
+            </div>
+          )}
+          <div
+            className="absolute -top-2 -right-2 px-2 py-0.5 text-[10px] tracking-widest rounded-sm"
+            style={{ background: colors.primary, color: colors.paper, fontFamily: fontFamily.title }}
+          >
+            MOMENT
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   /* vintage：Polaroid 居中微旋 */
   if (style === 'vintage') {
@@ -1165,8 +1657,81 @@ function SingleLayout({ photo, caption, template }: { photo: Photo; caption?: st
 /* ============================================================
  *  版式 3：单竖图 —— 左图 + 右文，各 style 独立骨架
  * ============================================================ */
-function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; caption?: string; template: Template }) {
-  const { style, colors, fontFamily } = template;
+function SinglePortraitLayout({
+  photo,
+  caption,
+  template,
+  variantOverride,
+}: {
+  photo: Photo;
+  caption?: string;
+  template: Template;
+  variantOverride?: string;
+}) {
+  const { colors, fontFamily } = template;
+  const style: TemplateStyle = isTemplateStyle(variantOverride) ? variantOverride : template.style;
+  const extraVariant: string | undefined =
+    variantOverride && !isTemplateStyle(variantOverride) ? variantOverride : undefined;
+
+  /* overlay：整版大图 + 右下半透明文字卡 */
+  if (extraVariant === 'overlay') {
+    return (
+      <div className="h-full w-full relative overflow-hidden">
+        <div className="absolute inset-0">
+          <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="absolute right-6 bottom-6 left-10 px-5 py-4 backdrop-blur-sm"
+          style={{
+            background: `${colors.paper}d9`,
+            borderLeft: `3px solid ${colors.primary}`,
+          }}
+        >
+          <div
+            className="text-[10px] tracking-[0.4em] mb-1"
+            style={{ color: colors.accent, fontFamily: fontFamily.title }}
+          >
+            STORY
+          </div>
+          <div
+            className="text-sm leading-relaxed"
+            style={{ color: colors.text, fontFamily: fontFamily.title }}
+          >
+            {caption ?? '这一刻，值得被珍藏。'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* split：上下分屏——上图下文 */
+  if (extraVariant === 'split') {
+    return (
+      <div className="h-full w-full flex flex-col">
+        <div className="flex-[3] overflow-hidden">
+          <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+        </div>
+        <div
+          className="flex-[2] flex flex-col justify-center px-8 py-6 gap-3"
+          style={{ background: colors.paper }}
+        >
+          <div
+            className="text-[10px] tracking-[0.5em]"
+            style={{ color: colors.accent, fontFamily: fontFamily.title }}
+          >
+            CHAPTER · 01
+          </div>
+          <div className="h-px w-12" style={{ background: colors.primary }} />
+          <div
+            className="text-base leading-loose"
+            style={{ color: colors.text, fontFamily: fontFamily.title }}
+          >
+            {caption ?? '这一刻，值得被珍藏。'}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (style === 'minimal') {
     return (
@@ -1354,11 +1919,11 @@ function SinglePortraitLayout({ photo, caption, template }: { photo: Photo; capt
 /* ============================================================
  *  版式 4：双图并排 —— 每 style 差异化排版，不再等分长条
  * ============================================================ */
-function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
+function DoubleLayout({ photos, caption, template, variantOverride }: { photos: Photo[]; caption?: string; template: Template; variantOverride?: string }) {
   const { style, colors, fontFamily } = template;
 
   // 用户模板若显式指定了变体，优先走通用 variant 骨架（相框/气泡仍随 style）
-  const variant = template.layoutVariants?.double;
+  const variant = variantOverride ?? template.layoutVariants?.double;
   if (variant) {
     return <DoubleVariant variant={variant} photos={photos} caption={caption} template={template} />;
   }
@@ -1545,10 +2110,10 @@ function DoubleLayout({ photos, caption, template }: { photos: Photo[]; caption?
 /* ============================================================
  *  版式 5：三图拼贴 —— 每 style 独立骨架
  * ============================================================ */
-function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
+function TripleLayout({ photos, caption, template, variantOverride }: { photos: Photo[]; caption?: string; template: Template; variantOverride?: string }) {
   const { style, colors, fontFamily } = template;
 
-  const variant = template.layoutVariants?.triple;
+  const variant = variantOverride ?? template.layoutVariants?.triple;
   if (variant) {
     return <TripleVariant variant={variant} photos={photos} caption={caption} template={template} />;
   }
@@ -1790,10 +2355,10 @@ function TripleLayout({ photos, caption, template }: { photos: Photo[]; caption?
 /* ============================================================
  *  版式 6：四格拼贴 —— 每 style 独立骨架
  * ============================================================ */
-function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?: string; template: Template }) {
+function Grid4Layout({ photos, caption, template, variantOverride }: { photos: Photo[]; caption?: string; template: Template; variantOverride?: string }) {
   const { style, colors, fontFamily } = template;
 
-  const variant = template.layoutVariants?.grid4;
+  const variant = variantOverride ?? template.layoutVariants?.grid4;
   if (variant) {
     return <Grid4Variant variant={variant} photos={photos} caption={caption} template={template} />;
   }
@@ -1996,12 +2561,44 @@ function Grid4Layout({ photos, caption, template }: { photos: Photo[]; caption?:
 }
 
 /* ============================================================
- *  版式 7：纯文字（章节页）—— 每 style 独立骨架
+ *  版式 7：纯文字（章节页）
+ *
+ *  支持的样式 variant（page.variant）：
+ *    - 'minimal'        清新极简（杂志式排版 + 大留白 + 细分割线）
+ *    - 'watercolor'     水彩手写（左上斜贴标签 + 落款）
+ *    - 'cartoon'        卡通气泡（大气泡对话框）
+ *    - 'vintage'        复古胶片（打字机体 + 上下虚线 + 引文竖线）
+ *    - 'festival-cn'    中国红（竖排标题 + 印章感）
+ *    - 'festival-xmas'  圣诞（雪花 + 渐变分割线）
+ *    - 'poster'         海报大字（占满版面的超大标题 + 底部行脚注）
+ *    - 'quote'          手写引言（大引号 + 居中段落 + 横线签名）
+ *    - 'card'           卡片便签（居中米色卡片 + 细边框 + 角标）
+ *    - 'timeline'       时间轴（左侧圆点竖线 + 右侧章节序号 + 正文）
+ *
+ *  不填（undefined）时，兜底使用 template.style；若该 style 没有对应样式
+ *  分支则退到 watercolor 通用样式。
  * ============================================================ */
+
+/** 文字页可用样式 id */
+export type TextVariantId =
+  | 'minimal'
+  | 'watercolor'
+  | 'cartoon'
+  | 'vintage'
+  | 'festival-cn'
+  | 'festival-xmas'
+  | 'poster'
+  | 'quote'
+  | 'card'
+  | 'timeline';
+
 function TextLayout({ page, template }: { page: BookPage; template: Template }) {
   const { style, colors, fontFamily, decorations } = template;
 
-  if (style === 'minimal') {
+  // 优先使用页面自定义 variant，否则跟随模板 style
+  const variant: TextVariantId = (page.variant as TextVariantId) || (style as TextVariantId);
+
+  if (variant === 'minimal') {
     return (
       <div className="h-full w-full flex flex-col justify-center px-12 gap-6">
         <div className="text-[10px] tracking-[0.5em]" style={{ color: colors.accent }}>
@@ -2018,7 +2615,7 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
     );
   }
 
-  if (style === 'festival-cn') {
+  if (variant === 'festival-cn') {
     return (
       <div className="h-full w-full flex items-center justify-center p-10">
         <div className="text-center">
@@ -2041,7 +2638,7 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
   }
 
   /* watercolor：左上斜贴手写小标签 + 右下落款风 */
-  if (style === 'watercolor') {
+  if (variant === 'watercolor') {
     return (
       <div className="h-full w-full flex flex-col justify-center px-12 gap-5 relative">
         <div
@@ -2075,7 +2672,7 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
   }
 
   /* cartoon：巨大气泡 */
-  if (style === 'cartoon') {
+  if (variant === 'cartoon') {
     return (
       <div className="h-full w-full flex items-center justify-center p-8">
         <div
@@ -2111,7 +2708,7 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
   }
 
   /* vintage：左右留打字机缩进 + 上下两条虚线 */
-  if (style === 'vintage') {
+  if (variant === 'vintage') {
     return (
       <div className="h-full w-full flex flex-col justify-center px-10 gap-5">
         <div
@@ -2142,7 +2739,7 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
   }
 
   /* festival-xmas：大雪花 + 对角装饰 */
-  if (style === 'festival-xmas') {
+  if (variant === 'festival-xmas') {
     return (
       <div className="h-full w-full flex flex-col items-center justify-center px-10 gap-4 relative">
         <div className="text-5xl" style={{ color: colors.accent }}>
@@ -2164,6 +2761,164 @@ function TextLayout({ page, template }: { page: BookPage; template: Template }) 
         >
           {page.caption}
         </p>
+      </div>
+    );
+  }
+
+  /* poster：海报大字 —— 占满整页的超大标题 + 底部细节脚注 */
+  if (variant === 'poster') {
+    return (
+      <div className="h-full w-full flex flex-col justify-between p-8 relative overflow-hidden">
+        <div
+          className="absolute inset-0 opacity-[0.08]"
+          style={{
+            background: `radial-gradient(circle at 20% 10%, ${colors.primary} 0%, transparent 50%), radial-gradient(circle at 85% 90%, ${colors.accent} 0%, transparent 50%)`,
+          }}
+        />
+        <div className="relative">
+          <div className="text-[10px] tracking-[0.6em] mb-3" style={{ color: colors.accent }}>
+            CHAPTER
+          </div>
+          <h2
+            className="font-bold leading-[0.95] tracking-tight"
+            style={{
+              fontFamily: fontFamily.title,
+              color: colors.primary,
+              fontSize: 'clamp(44px, 14vw, 92px)',
+              wordBreak: 'break-word',
+            }}
+          >
+            {page.title}
+          </h2>
+        </div>
+        <div className="relative flex items-end justify-between gap-4">
+          <p
+            className="text-sm leading-relaxed opacity-80 max-w-[70%]"
+            style={{ fontFamily: fontFamily.title, color: colors.text }}
+          >
+            {page.caption}
+          </p>
+          <div className="text-[10px] tracking-[0.4em] opacity-60 whitespace-nowrap" style={{ color: colors.text }}>
+            · BABYBOOK ·
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* quote：手写引言 —— 两个大引号 + 居中段落 + 横线签名 */
+  if (variant === 'quote') {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center px-10 gap-4 text-center">
+        <div
+          className="text-[80px] leading-none -mb-4"
+          style={{ color: colors.primary, fontFamily: 'Georgia, serif', opacity: 0.25 }}
+        >
+          &ldquo;
+        </div>
+        <h2
+          className="text-2xl sm:text-3xl font-bold italic"
+          style={{ fontFamily: fontFamily.title, color: colors.primary }}
+        >
+          {page.title}
+        </h2>
+        <p
+          className="text-sm italic leading-loose max-w-sm opacity-80"
+          style={{ fontFamily: fontFamily.title, color: colors.text }}
+        >
+          {page.caption}
+        </p>
+        <div
+          className="mt-2 h-px w-20"
+          style={{ background: colors.accent, opacity: 0.6 }}
+        />
+        <div className="text-[11px] tracking-[0.3em]" style={{ color: colors.accent }}>
+          — MEMO —
+        </div>
+      </div>
+    );
+  }
+
+  /* card：卡片便签 —— 居中米色便签卡 + 细边框 + 左上角标 */
+  if (variant === 'card') {
+    return (
+      <div className="h-full w-full flex items-center justify-center p-8">
+        <div
+          className="relative w-full max-w-[85%] rounded-lg p-7"
+          style={{
+            background: colors.paper,
+            border: `1px solid ${colors.primary}33`,
+            boxShadow: `0 6px 20px ${colors.primary}14`,
+          }}
+        >
+          <div
+            className="absolute -top-3 left-5 px-2 py-0.5 text-[10px] tracking-[0.3em] rounded"
+            style={{
+              background: colors.primary,
+              color: colors.paper,
+              fontFamily: fontFamily.title,
+            }}
+          >
+            NOTE
+          </div>
+          <div className="text-lg mb-2" style={{ color: colors.accent }}>
+            {decorations[0] ?? '✦'}
+          </div>
+          <h2
+            className="text-2xl font-bold leading-tight mb-3"
+            style={{ fontFamily: fontFamily.title, color: colors.primary }}
+          >
+            {page.title}
+          </h2>
+          <p
+            className="text-sm leading-loose opacity-85"
+            style={{ fontFamily: fontFamily.title, color: colors.text }}
+          >
+            {page.caption}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  /* timeline：时间轴 —— 左侧竖线圆点 + 右侧章节序号 + 标题正文 */
+  if (variant === 'timeline') {
+    return (
+      <div className="h-full w-full flex items-center px-8">
+        <div className="relative flex gap-5 w-full">
+          {/* 左侧竖线 + 圆点 */}
+          <div className="relative flex flex-col items-center pt-1 shrink-0">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ background: colors.primary, boxShadow: `0 0 0 4px ${colors.primary}22` }}
+            />
+            <div
+              className="flex-1 w-px mt-1 min-h-[120px]"
+              style={{ background: `${colors.primary}55` }}
+            />
+          </div>
+          {/* 右侧正文 */}
+          <div className="flex-1 min-w-0 pt-0.5">
+            <div
+              className="text-[10px] tracking-[0.4em] mb-2"
+              style={{ color: colors.accent, fontFamily: fontFamily.title }}
+            >
+              CHAPTER · {page.title ? page.title.slice(0, 1) : '·'}
+            </div>
+            <h2
+              className="text-2xl sm:text-3xl font-bold leading-tight mb-3"
+              style={{ fontFamily: fontFamily.title, color: colors.primary }}
+            >
+              {page.title}
+            </h2>
+            <p
+              className="text-sm leading-loose opacity-85 max-w-md"
+              style={{ fontFamily: fontFamily.title, color: colors.text }}
+            >
+              {page.caption}
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2630,12 +3385,14 @@ function Grid5Layout({
   photos,
   caption,
   template,
+  variantOverride,
 }: {
   photos: Photo[];
   caption?: string;
   template: Template;
+  variantOverride?: string;
 }) {
-  const variant = template.layoutVariants?.grid5 ?? defaultVariantId('grid5');
+  const variant = variantOverride ?? template.layoutVariants?.grid5 ?? defaultVariantId('grid5');
 
   if (variant === 'hero-center') {
     // 中央大图 + 四个角小图
@@ -2717,12 +3474,14 @@ function Grid6Layout({
   photos,
   caption,
   template,
+  variantOverride,
 }: {
   photos: Photo[];
   caption?: string;
   template: Template;
+  variantOverride?: string;
 }) {
-  const variant = template.layoutVariants?.grid6 ?? defaultVariantId('grid6');
+  const variant = variantOverride ?? template.layoutVariants?.grid6 ?? defaultVariantId('grid6');
 
   if (variant === 'hero-left-5') {
     return (
