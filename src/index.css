@@ -4,6 +4,115 @@
 
 :root {
   color-scheme: light;
+
+  /* ——————————— 站点主题 CSS 变量（默认：赛博朋克，会被 [data-site-theme] 覆盖） ——————————— */
+  --bb-bg: linear-gradient(135deg, #0b0420 0%, #1a0730 55%, #08131c 100%);
+  --bb-bg-solid: #0b0420;
+  --bb-fg: #f4f6ff;
+  --bb-fg-muted: #9aa2c4;
+  --bb-surface: rgba(20, 10, 40, 0.55);
+  --bb-surface-strong: rgba(28, 14, 54, 0.85);
+  --bb-border: rgba(255, 43, 214, 0.35);
+  --bb-primary: #ff2bd6;   /* 品红霓虹 */
+  --bb-accent: #22d3ee;    /* 青霓虹 */
+  --bb-hero-from: rgba(255, 43, 214, 0.28);
+  --bb-hero-via: rgba(124, 58, 237, 0.35);
+  --bb-hero-to: rgba(34, 211, 238, 0.30);
+  --bb-header-bg: rgba(8, 6, 24, 0.7);
+  --bb-header-border: rgba(255, 43, 214, 0.25);
+  --bb-pill-bg: rgba(255, 43, 214, 0.15);
+  --bb-pill-fg: #ffb4ee;
+  --bb-btn-bg: linear-gradient(135deg, #ff2bd6 0%, #22d3ee 100%);
+  --bb-btn-fg: #09020f;
+  --bb-card-bg: rgba(18, 10, 38, 0.72);
+  --bb-card-border: rgba(34, 211, 238, 0.28);
+  --bb-card-glow: 0 0 0 1px rgba(255, 43, 214, 0.35), 0 10px 40px -10px rgba(255, 43, 214, 0.45);
+  --bb-link: #22d3ee;
+  --bb-font-display: 'Playfair Display', 'Orbitron', 'PingFang SC', serif;
+}
+
+/* 温馨奶油（原默认风） */
+[data-site-theme='soft'] {
+  color-scheme: light;
+  --bb-bg: linear-gradient(135deg, #fff7ed 0%, #fef2f2 50%, #f5f3ff 100%);
+  --bb-bg-solid: #fff7ed;
+  --bb-fg: #2d2a26;
+  --bb-fg-muted: #6b7280;
+  --bb-surface: rgba(255, 255, 255, 0.6);
+  --bb-surface-strong: #ffffff;
+  --bb-border: rgba(0, 0, 0, 0.06);
+  --bb-primary: #e8a4a0;
+  --bb-accent: #bfd8e8;
+  --bb-hero-from: #f8d5c2;
+  --bb-hero-via: #faf3e7;
+  --bb-hero-to: #bfd8e8;
+  --bb-header-bg: rgba(255, 255, 255, 0.6);
+  --bb-header-border: rgba(0, 0, 0, 0.05);
+  --bb-pill-bg: rgba(255, 255, 255, 0.7);
+  --bb-pill-fg: #2d2a26;
+  --bb-btn-bg: #171717;
+  --bb-btn-fg: #ffffff;
+  --bb-card-bg: #ffffff;
+  --bb-card-border: rgba(0, 0, 0, 0.05);
+  --bb-card-glow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --bb-link: #52525b;
+  --bb-font-display: 'Playfair Display', 'Georgia', serif;
+}
+
+/* 深夜剧场：极简深色 + 金色点缀 */
+[data-site-theme='dark'] {
+  color-scheme: dark;
+  --bb-bg: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  --bb-bg-solid: #0f172a;
+  --bb-fg: #f8fafc;
+  --bb-fg-muted: #94a3b8;
+  --bb-surface: rgba(30, 41, 59, 0.6);
+  --bb-surface-strong: #1e293b;
+  --bb-border: rgba(245, 158, 11, 0.25);
+  --bb-primary: #f59e0b;
+  --bb-accent: #fcd34d;
+  --bb-hero-from: rgba(245, 158, 11, 0.22);
+  --bb-hero-via: rgba(30, 41, 59, 0.9);
+  --bb-hero-to: rgba(15, 23, 42, 1);
+  --bb-header-bg: rgba(15, 23, 42, 0.75);
+  --bb-header-border: rgba(245, 158, 11, 0.2);
+  --bb-pill-bg: rgba(245, 158, 11, 0.15);
+  --bb-pill-fg: #fcd34d;
+  --bb-btn-bg: linear-gradient(135deg, #f59e0b 0%, #fcd34d 100%);
+  --bb-btn-fg: #0f172a;
+  --bb-card-bg: rgba(30, 41, 59, 0.8);
+  --bb-card-border: rgba(245, 158, 11, 0.2);
+  --bb-card-glow: 0 10px 30px -10px rgba(245, 158, 11, 0.25);
+  --bb-link: #fcd34d;
+  --bb-font-display: 'Playfair Display', 'Georgia', serif;
+}
+
+/* 樱花和风 */
+[data-site-theme='sakura'] {
+  color-scheme: light;
+  --bb-bg: linear-gradient(135deg, #ffeef3 0%, #ffd0df 50%, #ece0ff 100%);
+  --bb-bg-solid: #ffeef3;
+  --bb-fg: #4a2644;
+  --bb-fg-muted: #8b6b85;
+  --bb-surface: rgba(255, 255, 255, 0.65);
+  --bb-surface-strong: #ffffff;
+  --bb-border: rgba(192, 132, 252, 0.25);
+  --bb-primary: #ec4899;
+  --bb-accent: #c084fc;
+  --bb-hero-from: #ffd0df;
+  --bb-hero-via: #ffeef3;
+  --bb-hero-to: #ece0ff;
+  --bb-header-bg: rgba(255, 255, 255, 0.7);
+  --bb-header-border: rgba(192, 132, 252, 0.2);
+  --bb-pill-bg: rgba(255, 255, 255, 0.8);
+  --bb-pill-fg: #6b2c5c;
+  --bb-btn-bg: linear-gradient(135deg, #ec4899 0%, #c084fc 100%);
+  --bb-btn-fg: #ffffff;
+  --bb-card-bg: #ffffff;
+  --bb-card-border: rgba(192, 132, 252, 0.2);
+  --bb-card-glow: 0 12px 30px -12px rgba(236, 72, 153, 0.3);
+  --bb-link: #9d174d;
+  --bb-font-display: 'Playfair Display', 'Georgia', serif;
 }
 
 html,
@@ -14,10 +123,112 @@ body,
 
 body {
   margin: 0;
-  background: linear-gradient(135deg, #fff7ed 0%, #fef2f2 50%, #f5f3ff 100%);
-  color: #2d2a26;
+  background: var(--bb-bg);
+  background-attachment: fixed;
+  color: var(--bb-fg);
   -webkit-font-smoothing: antialiased;
   font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  transition: background-color 300ms ease, color 300ms ease;
+}
+
+/* ============================================================
+ * 赛博朋克专属视觉增强：扫描线、霓虹辉光、网格背景
+ * ============================================================ */
+[data-site-theme='cyberpunk'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.025) 0px,
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(
+      ellipse at 20% 0%,
+      rgba(255, 43, 214, 0.22) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at 90% 100%,
+      rgba(34, 211, 238, 0.22) 0%,
+      transparent 55%
+    );
+  mix-blend-mode: screen;
+}
+
+[data-site-theme='cyberpunk'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(255, 43, 214, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+}
+
+/* 让实际内容层浮在这些装饰之上 */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* 赛博朋克：链接/导航激活项带霓虹辉光 */
+[data-site-theme='cyberpunk'] .bb-neon-text {
+  color: var(--bb-primary);
+  text-shadow:
+    0 0 6px rgba(255, 43, 214, 0.6),
+    0 0 18px rgba(255, 43, 214, 0.45);
+}
+[data-site-theme='cyberpunk'] .bb-neon-text-cyan {
+  color: var(--bb-accent);
+  text-shadow:
+    0 0 6px rgba(34, 211, 238, 0.6),
+    0 0 18px rgba(34, 211, 238, 0.45);
+}
+
+/* 通用"站点主题感知"的按钮/卡片/药丸等工具类 */
+.bb-btn-primary {
+  background: var(--bb-btn-bg);
+  color: var(--bb-btn-fg);
+  border: none;
+}
+.bb-btn-ghost {
+  background: var(--bb-surface);
+  color: var(--bb-fg);
+  border: 1px solid var(--bb-border);
+  backdrop-filter: blur(8px);
+}
+.bb-card {
+  background: var(--bb-card-bg);
+  border: 1px solid var(--bb-card-border);
+  box-shadow: var(--bb-card-glow);
+  color: var(--bb-fg);
+}
+.bb-pill {
+  background: var(--bb-pill-bg);
+  color: var(--bb-pill-fg);
+  border: 1px solid var(--bb-border);
+  backdrop-filter: blur(8px);
+}
+
+/* 赛博朋克：主按钮加一道边缘霓虹光 */
+[data-site-theme='cyberpunk'] .bb-btn-primary {
+  box-shadow:
+    0 0 0 1px rgba(255, 43, 214, 0.65),
+    0 0 18px rgba(255, 43, 214, 0.55),
+    0 0 36px rgba(34, 211, 238, 0.35);
+}
+[data-site-theme='cyberpunk'] .bb-btn-primary:hover {
+  filter: brightness(1.1);
 }
 
 /* 翻页动画（旧版，保留兼容） */

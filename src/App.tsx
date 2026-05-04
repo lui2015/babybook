@@ -9,12 +9,14 @@ import { TemplatesPage } from './pages/TemplatesPage';
 import { TemplateEditorPage } from './pages/TemplateEditorPage';
 import { DraftProvider } from './DraftContext';
 import { TemplateRegistryProvider } from './TemplateRegistry';
+import { SiteThemeProvider } from './siteTheme';
 
 export default function App() {
   return (
-    <TemplateRegistryProvider>
-      <DraftProvider>
-        <div className="min-h-screen">
+    <SiteThemeProvider>
+      <TemplateRegistryProvider>
+        <DraftProvider>
+          <div className="min-h-screen">
           <AppHeader />
           <main>
             <Routes>
@@ -30,7 +32,8 @@ export default function App() {
             </Routes>
           </main>
         </div>
-      </DraftProvider>
-    </TemplateRegistryProvider>
+        </DraftProvider>
+      </TemplateRegistryProvider>
+    </SiteThemeProvider>
   );
 }
