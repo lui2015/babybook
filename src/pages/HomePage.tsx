@@ -2,63 +2,17 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { TEMPLATES } from '../templates';
 import { TemplatePreviewModal } from '../components/TemplatePreviewModal';
-import { SITE_THEMES, useSiteTheme, type SiteThemeId } from '../siteTheme';
+import { useSiteTheme } from '../siteTheme';
 import type { Template } from '../types';
 
 export function HomePage() {
   const navigate = useNavigate();
   const [previewTpl, setPreviewTpl] = useState<Template | null>(null);
-  const { theme, setTheme } = useSiteTheme();
+  const { theme } = useSiteTheme();
   const isCyberpunk = theme === 'cyberpunk';
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      {/* 站点风格挑选条 */}
-      <section className="mb-6">
-        <div
-          className="rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3 bb-card"
-        >
-          <div className="flex-shrink-0">
-            <div
-              className="text-[10px] tracking-[0.3em]"
-              style={{ color: 'var(--bb-fg-muted)' }}
-            >
-              SITE STYLE · 选择你喜欢的整站风格
-            </div>
-            <div
-              className="font-display text-base sm:text-lg"
-              style={{ color: 'var(--bb-fg)' }}
-            >
-              当前风格：
-              <span
-                className={isCyberpunk ? 'bb-neon-text font-bold' : 'font-bold'}
-                style={
-                  isCyberpunk
-                    ? undefined
-                    : { color: 'var(--bb-primary)' }
-                }
-              >
-                {SITE_THEMES.find((t) => t.id === theme)?.name}
-              </span>
-            </div>
-          </div>
-          <div className="flex-1" />
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-            {SITE_THEMES.map((t) => (
-              <ThemePickerChip
-                key={t.id}
-                id={t.id}
-                name={t.name}
-                emoji={t.emoji}
-                swatch={t.swatch}
-                active={t.id === theme}
-                onPick={setTheme}
-              />
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Hero */}
       <section
         className="relative overflow-hidden rounded-3xl p-8 sm:p-14"
@@ -250,47 +204,6 @@ function Feature({ icon, title, text }: { icon: string; title: string; text: str
         {text}
       </div>
     </div>
-  );
-}
-
-function ThemePickerChip({
-  id,
-  name,
-  emoji,
-  swatch,
-  active,
-  onPick,
-}: {
-  id: SiteThemeId;
-  name: string;
-  emoji: string;
-  swatch: [string, string, string];
-  active: boolean;
-  onPick: (id: SiteThemeId) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(id)}
-      className="flex items-center gap-2 px-3 py-2 rounded-full border transition whitespace-nowrap"
-      style={{
-        borderColor: active ? 'var(--bb-primary)' : 'var(--bb-border)',
-        background: active ? 'var(--bb-pill-bg)' : 'var(--bb-surface)',
-        color: 'var(--bb-fg)',
-        boxShadow: active ? '0 0 0 2px var(--bb-primary) inset' : undefined,
-      }}
-      title={`切换为「${name}」`}
-    >
-      <span
-        className="w-5 h-5 rounded-full border"
-        style={{
-          background: `linear-gradient(135deg, ${swatch[0]} 0%, ${swatch[1]} 50%, ${swatch[2]} 100%)`,
-          borderColor: 'var(--bb-border)',
-        }}
-      />
-      <span className="text-xs">{emoji}</span>
-      <span className="text-xs font-medium">{name}</span>
-    </button>
   );
 }
 
