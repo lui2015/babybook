@@ -6,7 +6,12 @@ import { PageView } from '../components/PageView';
 import { applyBookTheme } from '../bookTheme';
 import { VARIANTS, defaultVariantId } from '../layoutVariants';
 import { fileToPhoto } from '../imageUtils';
-import type { Book, BookPage, PageLayoutType, Photo, PhotoShape, Template } from '../types';
+import type { Book, BookPage, PageLayoutType, Photo, PhotoFocus, PhotoShape, Template } from '../types';
+
+/** 将数值约束到 [min, max] 区间 */
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
+}
 
 /**
  * 画册全功能编辑器
@@ -187,6 +192,68 @@ export function BookEditorPage() {
     // 若整个数组全部为 undefined，则删掉字段保持数据干净
     const clean = next.some((s) => !!s) ? next : undefined;
     patchCurrentPage({ photoShapes: clean });
+  }
+
+  /**
+   * 设置当前页第 slot 张照片的"焦点位置"（object-position 百分比）。
+   * focus = undefined 表示恢复居中，编辑时会从数组中清除。
+   */
+  function setPhotoFocus(slot: number, focus: PhotoFocus | undefined) {
+    const prev = currentPage.photoFocus ?? [];
+    const next: (PhotoFocus | undefined)[] = Array.from(
+      { length: currentPage.photoIds.length },
+      (_, i) => prev[i],
+    );
+    // 居中 (50,50) 视为缺省，存为 undefined 让数据更干净
+    const isCenter =
+      focus && Math.abs(focus.x - 50) < 0.5 && Math.abs(focus.y - 50) < 0.5;
+    next[slot] = isCenter ? undefined : focus;
+    const clean = next.some((f) => !!f) ? next : undefined;
+    patchCurrentPage({ photoFocus: clean });
+  }
+
+  /**
+   * 拖动调整焦点：把鼠标位移换算为 object-position 增量。
+   *
+   * 渲染端在 cover 之上又叠了 `zoom` 倍的额外缩放（让两个轴都有 slack，
+   * 避免横/竖图在 1:1 相框里只能单方向拖动），所以 slack 也要乘 zoom：
+   *   s = max(W/iw, H/ih) * zoom
+   *   slackX = iw*s - W
+   *   slackY = ih*s - H
+   * object-position: x% y% 中 x 增加表示图片向左滚（看更右边），
+   * 因此鼠标向右拖（用户想把右边内容拖到中央）= 焦点 x 减小。
+   */
+  function handleAdjustFocus(
+    photoId: string,
+    info: {
+      dx: number;
+      dy: number;
+      containerW: number;
+      containerH: number;
+      naturalW: number;
+      naturalH: number;
+      startFocus: PhotoFocus;
+      zoom: number;
+    },
+  ) {
+    const slot = currentPage.photoIds.indexOf(photoId);
+    if (slot < 0) return;
+    const { dx, dy, containerW, containerH, naturalW, naturalH, startFocus, zoom } = info;
+    if (containerW <= 0 || containerH <= 0 || naturalW <= 0 || naturalH <= 0) return;
+    const z = zoom > 0 ? zoom : 1;
+    const scale = Math.max(containerW / naturalW, containerH / naturalH) * z;
+    const slackX = naturalW * scale - containerW;
+    const slackY = naturalH * scale - containerH;
+    // 任一轴可滑动量为 0 时，焦点固定 50%
+    const nextX =
+      slackX > 0.5
+        ? clamp(startFocus.x - (dx / slackX) * 100, 0, 100)
+        : 50;
+    const nextY =
+      slackY > 0.5
+        ? clamp(startFocus.y - (dy / slackY) * 100, 0, 100)
+        : 50;
+    setPhotoFocus(slot, { x: nextX, y: nextY });
   }
 
   /**
@@ -634,6 +701,7 @@ export function BookEditorPage() {
               onSelectPhoto={setSelectedPhotoId}
               selectedPhotoId={selectedPhotoId}
               photoFrameColor={book.theme?.photoFrameColor ?? null}
+              onAdjustFocus={handleAdjustFocus}
             />
           </div>
 
@@ -641,7 +709,7 @@ export function BookEditorPage() {
           {selectedPhotoId && selectedSlot() >= 0 && (
             <div className="mt-3 flex items-center gap-2 bg-white rounded-full shadow border border-neutral-200 pl-3 pr-1 py-1">
               <span className="text-[11px] text-neutral-500">
-                已选中第 <b className="text-rose">{selectedSlot() + 1}</b> 张 ·
+                已选中第 <b className="text-rose">{selectedSlot() + 1}</b> 张 · 拖动可调整画面位置
               </span>
               {tab !== 'layout' && (
                 <button
@@ -662,6 +730,15 @@ export function BookEditorPage() {
               >
                 ↑ 上传替换
               </button>
+              {currentPage.photoFocus?.[selectedSlot()] && (
+                <button
+                  onClick={() => setPhotoFocus(selectedSlot(), undefined)}
+                  className="text-[11px] px-2 py-1 rounded-full bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
+                  title="把画面位置恢复为居中"
+                >
+                  重置位置
+                </button>
+              )}
               <button
                 onClick={() => setSelectedPhotoId(null)}
                 className="text-[11px] px-2 py-1 rounded-full text-neutral-500 hover:bg-neutral-100"
@@ -672,7 +749,7 @@ export function BookEditorPage() {
           )}
           {!selectedPhotoId && (
             <div className="mt-3 text-[11px] text-neutral-500 bg-white/80 backdrop-blur rounded-full px-3 py-1 border border-neutral-200">
-              提示：点击预览里的照片进入选中态，再从右侧「排版」里的图库选图替换
+              提示：点击预览里的照片选中后，可拖动调整画面位置，或在右侧「排版」中替换/换形状
             </div>
           )}
           {uploading && (
@@ -709,6 +786,7 @@ export function BookEditorPage() {
                 page={currentPage}
                 template={template}
                 book={book}
+                rawTemplate={rawTemplate}
                 pageNumber={index + 1}
                 totalPages={total}
                 onPagePatch={patchCurrentPage}
@@ -874,6 +952,7 @@ function TextTab({
   page,
   template,
   book,
+  rawTemplate,
   pageNumber,
   totalPages,
   onPagePatch,
@@ -882,6 +961,7 @@ function TextTab({
   page: BookPage;
   template: Template;
   book: Book;
+  rawTemplate: Template;
   pageNumber: number;
   totalPages: number;
   onPagePatch: (patch: Partial<BookPage>) => void;
@@ -894,6 +974,19 @@ function TextTab({
   const captionLabel =
     page.layout === 'text' ? '正文' : page.layout === 'ending' ? '寄语' : '照片配文';
 
+  // 当前生效的字体（合并 book.theme.fontFamily 覆盖）
+  const theme = book.theme ?? {};
+  const effFont = { ...rawTemplate.fontFamily, ...(theme.fontFamily ?? {}) };
+
+  function setFont(patch: Partial<Template['fontFamily']>) {
+    onBookPatch({
+      theme: {
+        ...theme,
+        fontFamily: { ...(theme.fontFamily ?? {}), ...patch },
+      },
+    });
+  }
+
   return (
     <div className="space-y-6">
       <Section title="当前页文字" hint={`第 ${pageNumber} / ${totalPages} 页 · ${layoutLabel(page.layout)}`}>
@@ -901,10 +994,16 @@ function TextTab({
           <Field label={page.layout === 'cover' ? '封面标题' : '页面标题'}>
             <input
               className={inputCls}
+              style={{ fontFamily: effFont.title }}
               value={page.title ?? ''}
               onChange={(e) => onPagePatch({ title: e.target.value })}
               placeholder={template.defaultTitle}
               maxLength={40}
+            />
+            <FontPickerRow
+              role="title"
+              value={effFont.title}
+              onChange={(v) => setFont({ title: v })}
             />
           </Field>
         )}
@@ -912,6 +1011,7 @@ function TextTab({
           <Field label="副标题">
             <input
               className={inputCls}
+              style={{ fontFamily: effFont.title }}
               value={page.subtitle ?? ''}
               onChange={(e) => onPagePatch({ subtitle: e.target.value })}
               placeholder={template.defaultSubtitle}
@@ -923,6 +1023,7 @@ function TextTab({
           <Field label={captionLabel}>
             <textarea
               className={`${inputCls} min-h-[90px] resize-y leading-relaxed`}
+              style={{ fontFamily: effFont.body }}
               value={page.caption ?? ''}
               onChange={(e) => onPagePatch({ caption: e.target.value })}
               placeholder={
@@ -932,6 +1033,11 @@ function TextTab({
               }
               maxLength={page.layout === 'text' || page.layout === 'ending' ? 240 : 120}
             />
+            <FontPickerRow
+              role="body"
+              value={effFont.body}
+              onChange={(v) => setFont({ body: v })}
+            />
           </Field>
         )}
         {!showTitle && !showCaption && (
@@ -939,12 +1045,18 @@ function TextTab({
             此页暂无可编辑的文字
           </div>
         )}
+        <div className="text-[11px] text-neutral-400 mt-1 leading-relaxed">
+          字体作用于整本画册的「{
+            (showCaption ? '标题与正文' : '标题')
+          }」，可在「主题」Tab 里看到完整字体清单。
+        </div>
       </Section>
 
       <Section title="画册信息" hint="对所有页生效">
         <Field label="画册标题">
           <input
             className={inputCls}
+            style={{ fontFamily: effFont.title }}
             value={book.title}
             onChange={(e) => onBookPatch({ title: e.target.value })}
             maxLength={40}
@@ -968,6 +1080,47 @@ function TextTab({
           />
         </Field>
       </Section>
+    </div>
+  );
+}
+
+/**
+ * 紧凑字体选择器：横向滚动的小药丸按钮组，按 role 决定备选字体集合。
+ * 选中态高亮 + 字体本体渲染 sample，所见即所得。
+ */
+function FontPickerRow({
+  role,
+  value,
+  onChange,
+}: {
+  role: 'title' | 'body';
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const list = role === 'title' ? QUICK_FONT_OPTIONS_TITLE : QUICK_FONT_OPTIONS_BODY;
+  return (
+    <div className="mt-1.5">
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-1 -mx-0.5 px-0.5">
+        {list.map((f) => {
+          const active = value === f.value;
+          return (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => onChange(f.value)}
+              title={f.label}
+              className={`shrink-0 px-2.5 py-1 rounded-full border text-[11px] leading-none transition whitespace-nowrap ${
+                active
+                  ? 'border-rose bg-rose/10 text-rose font-medium'
+                  : 'border-neutral-200 text-neutral-600 hover:border-neutral-400 bg-white'
+              }`}
+              style={{ fontFamily: f.value }}
+            >
+              {f.sample ?? f.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1366,9 +1519,9 @@ function ShapeIcon({ shape, active }: { shape: PhotoShape; active: boolean }) {
   }
   if (shape === 'heart') {
     return (
-      <svg width={size} height={size} viewBox="0 0 20 20">
-        <path
-          d="M10 17 C 4 13 2 10 2 7 C 2 4.5 4 3 6 3 C 7.5 3 9 4 10 5.5 C 11 4 12.5 3 14 3 C 16 3 18 4.5 18 7 C 18 10 16 13 10 17 Z"
+      <svg width={size} height={size} viewBox="0 0 100 100">
+        <polygon
+          points="50,96 6,53 4,38 9,22 22,12 36,12 46,18 50,26 54,18 64,12 78,12 91,22 96,38 94,53"
           fill={color}
         />
       </svg>
@@ -1376,9 +1529,9 @@ function ShapeIcon({ shape, active }: { shape: PhotoShape; active: boolean }) {
   }
   if (shape === 'star') {
     return (
-      <svg width={size} height={size} viewBox="0 0 20 20">
+      <svg width={size} height={size} viewBox="0 0 100 100">
         <polygon
-          points="10,2 12.2,7.5 18,7.9 13.5,11.6 15,17 10,13.9 5,17 6.5,11.6 2,7.9 7.8,7.5"
+          points="50,4 61,36 95,36 68,57 78,92 50,71 22,92 32,57 5,36 39,36"
           fill={color}
         />
       </svg>
@@ -1386,8 +1539,8 @@ function ShapeIcon({ shape, active }: { shape: PhotoShape; active: boolean }) {
   }
   // hexagon
   return (
-    <svg width={size} height={size} viewBox="0 0 20 20">
-      <polygon points="6,3 14,3 18,10 14,17 6,17 2,10" fill={color} />
+    <svg width={size} height={size} viewBox="0 0 100 100">
+      <polygon points="25,2 75,2 98,50 75,98 25,98 2,50" fill={color} />
     </svg>
   );
 }
@@ -1396,14 +1549,41 @@ function ShapeIcon({ shape, active }: { shape: PhotoShape; active: boolean }) {
  *  Tab 3：主题（颜色 / 字体 / 背景图案）
  * ============================================================ */
 
-const FONT_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: '默认标题（Caveat 手写）', value: 'Caveat, Playfair Display, serif' },
-  { label: '衬线优雅（Playfair）', value: 'Playfair Display, serif' },
-  { label: '中文圆润（PingFang）', value: 'PingFang SC, sans-serif' },
-  { label: '现代无衬线', value: 'Inter, system-ui, sans-serif' },
-  { label: '打字机（Mono）', value: 'Courier New, monospace' },
-  { label: '中文手写', value: 'ZCOOL KuaiLe, Caveat, cursive' },
+/**
+ * 字体清单：覆盖中英文、衬线/无衬线/手写/打字机/海报体。
+ * - kind 用于在「文字」Tab 的紧凑字体选择器上分组（title 偏标题，body 偏正文，all 都适合）
+ * - sample 用于按钮内的迷你预览（中文优先）
+ */
+type FontKind = 'title' | 'body' | 'all';
+const FONT_OPTIONS: Array<{
+  label: string;
+  value: string;
+  kind: FontKind;
+  sample?: string;
+}> = [
+  { label: '手写英文（Caveat）', value: 'Caveat, Playfair Display, serif', kind: 'title', sample: 'Aa 手写' },
+  { label: '衬线优雅（Playfair）', value: 'Playfair Display, Georgia, serif', kind: 'title', sample: 'Aa 衬线' },
+  { label: '海报手写（Pacifico）', value: 'Pacifico, Caveat, cursive', kind: 'title', sample: 'Pacifico' },
+  { label: '中文圆润（快乐体）', value: '"ZCOOL KuaiLe", "PingFang SC", sans-serif', kind: 'title', sample: '宝宝快乐' },
+  { label: '中文楷体（霞鹜文楷）', value: '"ZCOOL XiaoWei", "Noto Serif SC", "Songti SC", serif', kind: 'all', sample: '小薇文楷' },
+  { label: '中文毛笔（马善政）', value: '"Ma Shan Zheng", "ZCOOL KuaiLe", cursive', kind: 'title', sample: '毛笔楷' },
+  { label: '中文手写（龙藏）', value: '"Long Cang", "Caveat", cursive', kind: 'title', sample: '龙藏手记' },
+  { label: '中文行楷（刘建毛草）', value: '"Liu Jian Mao Cao", "Long Cang", cursive', kind: 'title', sample: '行书一笔' },
+  { label: '中文志莽（Zhi Mang Xing）', value: '"Zhi Mang Xing", "Long Cang", cursive', kind: 'title', sample: '志莽行书' },
+  { label: '中文宋体（思源宋体）', value: '"Noto Serif SC", "Songti SC", serif', kind: 'all', sample: '思源宋体' },
+  { label: '中文黑体（思源黑体）', value: '"Noto Sans SC", "PingFang SC", sans-serif', kind: 'body', sample: '思源黑体' },
+  { label: '中文苹方（PingFang）', value: '"PingFang SC", "Microsoft YaHei", sans-serif', kind: 'body', sample: '苹方常规' },
+  { label: '英文无衬线（Inter）', value: 'Inter, system-ui, -apple-system, sans-serif', kind: 'body', sample: 'Inter Aa' },
+  { label: '打字机（Mono）', value: '"Courier New", "Menlo", monospace', kind: 'all', sample: 'Mono 01' },
 ];
+
+/** 给「文字」Tab 用的紧凑型字体清单（数量精简，避免 UI 过长） */
+const QUICK_FONT_OPTIONS_TITLE: typeof FONT_OPTIONS = FONT_OPTIONS.filter(
+  (f) => f.kind === 'title' || f.kind === 'all',
+);
+const QUICK_FONT_OPTIONS_BODY: typeof FONT_OPTIONS = FONT_OPTIONS.filter(
+  (f) => f.kind === 'body' || f.kind === 'all',
+);
 
 const COLOR_PRESETS: Array<{ name: string; colors: Template['colors'] }> = [
   {
@@ -1637,15 +1817,16 @@ function ThemeTab({
         </div>
       </Section>
 
-      <Section title="字体">
+      <Section title="字体" hint="改动会作用于整本画册的标题/正文">
         <Field label="标题字体">
           <select
             className={inputCls}
+            style={{ fontFamily: effFont.title }}
             value={effFont.title}
             onChange={(e) => setFont({ title: e.target.value })}
           >
             {FONT_OPTIONS.map((f) => (
-              <option key={f.value} value={f.value}>
+              <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
                 {f.label}
               </option>
             ))}
@@ -1657,11 +1838,12 @@ function ThemeTab({
         <Field label="正文字体">
           <select
             className={inputCls}
+            style={{ fontFamily: effFont.body }}
             value={effFont.body}
             onChange={(e) => setFont({ body: e.target.value })}
           >
             {FONT_OPTIONS.map((f) => (
-              <option key={f.value} value={f.value}>
+              <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
                 {f.label}
               </option>
             ))}

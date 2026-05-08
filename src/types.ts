@@ -133,6 +133,21 @@ export interface BookPage {
    * 非矩形形状会强制 1:1 比例以避免变形。
    */
   photoShapes?: (PhotoShape | undefined)[];
+  /**
+   * 每个 slot 的"焦点位置"（与 photoIds 按索引对齐），用于
+   * `object-position`。x/y 单位为百分比 0~100，默认 {x:50, y:50}（居中）。
+   * 当照片比例与相框不符（cover 模式裁切），用户可通过拖动调整看哪一块画面。
+   * undefined 表示使用默认居中。
+   */
+  photoFocus?: (PhotoFocus | undefined)[];
+}
+
+/** 照片在相框内的对焦位置（object-position 百分比） */
+export interface PhotoFocus {
+  /** 0~100，0=最左，100=最右，50=水平居中 */
+  x: number;
+  /** 0~100，0=最上，100=最下，50=垂直居中 */
+  y: number;
 }
 
 /** 画册级主题覆盖 —— 编辑器里用户在当前画册上的自定义，覆盖模板默认值 */

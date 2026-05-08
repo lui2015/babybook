@@ -19,20 +19,49 @@ export function CreatePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // 从 URL 读取 templateId，预选模板（来自首页"热门模板"点击）
+  // 若 URL 还带 auto=1，则视为「双击模板直达生成预览」：
+  //   - 已有 ≥6 张照片 → 直接跳到 step='generate'，跳过中间手动点"生成画册"按钮
+  //   - 否则 → 停在上传步骤，提示用户先补足照片
   const urlTemplateId = searchParams.get('templateId');
+  const urlAuto = searchParams.get('auto') === '1';
   const [presetHint, setPresetHint] = useState<string | null>(null);
+  const [autoSkipHint, setAutoSkipHint] = useState<string | null>(null);
   useEffect(() => {
-    if (!urlTemplateId) return;
-    const tpl = getTemplate(urlTemplateId);
-    if (tpl) {
-      draft.setTemplateId(tpl.id);
-      setPresetHint(tpl.name);
+    if (!urlTemplateId && !urlAuto) return;
+    if (urlTemplateId) {
+      const tpl = getTemplate(urlTemplateId);
+      if (tpl) {
+        draft.setTemplateId(tpl.id);
+        setPresetHint(tpl.name);
+        // 双击直达：照片已就绪则一步跳到「生成预览」
+        if (urlAuto) {
+          if (draft.photos.length >= 6) {
+            setStep('generate');
+          } else {
+            setAutoSkipHint(
+              `请先上传至少 6 张照片，之后会自动用「${tpl.name}」生成画册预览。`,
+            );
+          }
+        }
+      }
     }
     // 只在首次挂载时读取，读完后清掉 URL 参数，避免刷新时反复预选
     searchParams.delete('templateId');
+    searchParams.delete('auto');
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 上传步骤完成后，如果之前是双击直达流程且模板已选，自动推进到生成
+  const autoPending = !!autoSkipHint;
+  useEffect(() => {
+    if (!autoPending) return;
+    if (step !== 'upload') return;
+    if (draft.photos.length >= 6 && draft.templateId) {
+      setStep('generate');
+      setAutoSkipHint(null);
+    }
+  }, [autoPending, step, draft.photos.length, draft.templateId]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
@@ -46,6 +75,24 @@ export function CreatePage() {
           <button
             onClick={() => setPresetHint(null)}
             className="text-neutral-400 hover:text-neutral-700"
+            aria-label="关闭提示"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {autoSkipHint && (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <span>
+            {autoSkipHint}
+            <span className="ml-1 text-amber-700/80">
+              （已自动跳到上传步骤，传够 6 张会立刻为你生成画册）
+            </span>
+          </span>
+          <button
+            onClick={() => setAutoSkipHint(null)}
+            className="text-amber-500 hover:text-amber-700"
             aria-label="关闭提示"
           >
             ×
@@ -302,6 +349,9 @@ function StepTemplate({ onBack, onNext }: { onBack: () => void; onNext: () => vo
           </button>
         ))}
       </div>
+      <div className="text-xs text-neutral-500">
+        单击选中模板，<b className="text-neutral-700">双击直接生成画册</b>（等同于下方「生成画册」按钮）
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {list.map((t) => {
           const active = templateId === t.id;
@@ -309,7 +359,13 @@ function StepTemplate({ onBack, onNext }: { onBack: () => void; onNext: () => vo
             <button
               key={t.id}
               onClick={() => setTemplateId(t.id)}
-              className={`text-left rounded-2xl overflow-hidden bg-white border-2 transition ${
+              onDoubleClick={() => {
+                setTemplateId(t.id);
+                // 双击 = 等同于点击下方「生成画册」按钮
+                onNext();
+              }}
+              title={`双击「${t.name}」直接生成画册`}
+              className={`text-left rounded-2xl overflow-hidden bg-white border-2 transition select-none ${
                 active
                   ? 'border-rose shadow-lg scale-[1.02]'
                   : 'border-transparent hover:border-neutral-200'

@@ -333,16 +333,20 @@ body {
 
 /* ============================================================
  *  编辑器预览页：点击照片替换
- *  在 <PageView> 外层加 .pv-editable 时，所有 <img> 上 hover 变为可点击态
- *  并浮现"点击替换"角标；实际替换逻辑由上层事件委托处理。
+ *  在 <PageView> 外层加 .pv-editable 时，所有 <img> 或带 data-photo-id 的元素
+ *  上 hover 变为可点击态，并浮现"点击替换"角标；实际替换逻辑由上层事件委托处理。
+ *  注：cover 模式下照片用 <div data-photo-id> + background-image 渲染（为支持
+ *  焦点拖动），所以选择器同时覆盖 img 和 [data-photo-id]。
  * ============================================================ */
-.pv-editable img {
+.pv-editable img,
+.pv-editable [data-photo-id] {
   cursor: pointer;
   transition: filter 150ms ease, box-shadow 150ms ease, outline-color 150ms ease;
   outline: 2px solid transparent;
   outline-offset: -2px;
 }
-.pv-editable img:hover {
+.pv-editable img:hover,
+.pv-editable [data-photo-id]:hover {
   filter: brightness(0.82);
   outline-color: rgba(225, 29, 72, 0.9); /* rose-600 */
   box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.55) inset;
@@ -355,18 +359,28 @@ body {
 
 /* 选中态：
    - 根容器挂 .pv-has-selection 时，非选中的图片轻微降亮，弱化背景
-   - 选中的 <img> 加上 rose 描边 + 外发光，和 hover 样式区分开
-   选中标记由 PageView 的 effect 在运行时写入 img.dataset.selected */
-.pv-has-selection img {
+   - 选中的元素加上 rose 描边 + 外发光，和 hover 样式区分开
+   选中标记由 PageView 的 effect 在运行时写入 dataset.selected */
+.pv-has-selection img,
+.pv-has-selection [data-photo-id] {
   filter: brightness(0.72) saturate(0.85);
   transition: filter 150ms ease, outline-color 150ms ease, box-shadow 150ms ease;
 }
 .pv-editable img[data-selected='true'],
-.pv-editable img[data-selected='true']:hover {
+.pv-editable img[data-selected='true']:hover,
+.pv-editable [data-photo-id][data-selected='true'],
+.pv-editable [data-photo-id][data-selected='true']:hover {
   filter: none;
   outline: 3px solid #e11d48; /* rose-600 */
   outline-offset: -3px;
   box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.35),
     0 6px 24px rgba(225, 29, 72, 0.35);
+}
+/* 选中态下，选中元素的 cursor 优先用 grab，提示可拖动 */
+.pv-editable [data-focus-draggable='true'] {
+  cursor: grab !important;
+}
+.pv-editable [data-focus-draggable='true']:active {
+  cursor: grabbing !important;
 }
 

@@ -44,6 +44,8 @@ export function TemplatesPage() {
   const { allTemplates, userTemplates, builtinTemplates, refresh } =
     useTemplateRegistry();
   const [previewTpl, setPreviewTpl] = useState<Template | null>(null);
+  // 单击仅选中卡片（轻量高亮 + 提示文案变化），双击才进入「生成预览页面」
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [source, setSource] = useState<SourceFilter>('all');
   const [category, setCategory] = useState<TemplateCategory | 'all'>('all');
@@ -174,7 +176,7 @@ export function TemplatesPage() {
         <div>
           匹配到 <span className="font-semibold text-neutral-900">{filtered.length}</span> 套模板
         </div>
-        <div className="hidden sm:block">点击模板预览，满意后即可用它创建画册</div>
+        <div className="hidden sm:block">单击选中模板，双击直达生成预览</div>
       </div>
 
       {/* 列表 */}
@@ -188,16 +190,29 @@ export function TemplatesPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((t) => {
             const isMine = isUserTemplateId(t.id);
+            const isSelected = selectedId === t.id;
             return (
               <article
                 key={t.id}
-                className="group rounded-xl overflow-hidden border border-black/5 bg-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition"
+                className={`group rounded-xl overflow-hidden border bg-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition ${
+                  isSelected
+                    ? 'border-rose-400 ring-2 ring-rose-300/60 shadow-md'
+                    : 'border-black/5'
+                }`}
               >
                 <button
                   type="button"
-                  onClick={() => setPreviewTpl(t)}
-                  className="block w-full text-left focus:outline-none"
-                  title={`预览模板「${t.name}」`}
+                  onClick={() => setSelectedId(t.id)}
+                  onDoubleClick={() => {
+                    setSelectedId(t.id);
+                    // 双击 = 直达「生成预览」：带上 auto=1，CreatePage 会在条件满足时
+                    // 自动跳过模板二次选择步骤，直接进入生成画册预览
+                    navigate(
+                      `/create?templateId=${encodeURIComponent(t.id)}&auto=1`,
+                    );
+                  }}
+                  className="block w-full text-left focus:outline-none select-none"
+                  title={`双击预览模板「${t.name}」`}
                 >
                   <div
                     className="relative aspect-[3/4] flex flex-col items-center justify-center p-4 text-center"
@@ -218,9 +233,21 @@ export function TemplatesPage() {
                       {t.defaultTitle}
                     </div>
                     <div className="text-[10px] mt-1 opacity-70">{t.defaultSubtitle}</div>
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition">
-                      <span className="opacity-0 group-hover:opacity-100 transition px-3 py-1.5 rounded-full bg-white/90 text-neutral-900 text-xs font-medium shadow">
-                        预览效果 →
+                    <div
+                      className={`absolute inset-0 flex items-center justify-center transition ${
+                        isSelected
+                          ? 'bg-black/25'
+                          : 'bg-black/0 group-hover:bg-black/30'
+                      }`}
+                    >
+                      <span
+                        className={`px-3 py-1.5 rounded-full bg-white/90 text-neutral-900 text-xs font-medium shadow transition ${
+                          isSelected
+                            ? 'opacity-100'
+                            : 'opacity-0 group-hover:opacity-100'
+                        }`}
+                      >
+                        {isSelected ? '双击直达生成 →' : '双击直达生成 →'}
                       </span>
                     </div>
                     <div className="absolute top-2 right-2 flex gap-1">

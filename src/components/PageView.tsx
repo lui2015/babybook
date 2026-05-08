@@ -1,6 +1,6 @@
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import type { CSSProperties, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createContext, memo, useContext, useEffect, useRef, useState } from 'react';
-import type { BookPage, Photo, PhotoShape, Template, TemplateStyle } from '../types';
+import type { BookPage, Photo, PhotoFocus, PhotoShape, Template, TemplateStyle } from '../types';
 import { defaultVariantId } from '../layoutVariants';
 
 /**
@@ -16,6 +16,45 @@ const PhotoShapeContext = createContext<(photo: Photo) => PhotoShape | undefined
  */
 const PhotoFrameColorContext = createContext<string | null | undefined>(undefined);
 
+/**
+ * 当前页每张照片的"焦点位置"（object-position 百分比），由 PageViewInner 注入。
+ * 同样走 context，方便 PhotoFrame → SafeImg 顺手取用。
+ */
+const PhotoFocusContext = createContext<(photo: Photo) => PhotoFocus | undefined>(() => undefined);
+
+/**
+ * 编辑器拖拽相关：
+ * - 是否处于"可拖拽调整焦点"模式（即用户正点选了某张照片）
+ * - 当前选中的照片 id
+ * - 拖动回调：传入像素位移 + 容器/图片尺寸；编辑器据此换算 focus 增量并更新 page
+ *
+ * 这些都通过 context 注入，避免侵入每个版式组件。
+ */
+interface FocusEditCtx {
+  selectedPhotoId: string | null;
+  /**
+   * 用户在选中态下按住 img 拖动时调用。
+   * 拖动起点由 SafeImg 监听 pointerdown 触发 onDragStart，
+   * 移动/松手在 SafeImg 内部跟踪 pointermove/up，期间持续调用 onDragMove(dx, dy)。
+   * dx, dy 是相对按下点的像素位移。
+   */
+  onDragMove?: (
+    photoId: string,
+    info: {
+      dx: number;
+      dy: number;
+      containerW: number;
+      containerH: number;
+      naturalW: number;
+      naturalH: number;
+      startFocus: PhotoFocus;
+      /** 渲染时叠加在 cover 之上的额外缩放系数；编辑器据此计算可滑动量 slack */
+      zoom: number;
+    },
+  ) => void;
+}
+const FocusEditContext = createContext<FocusEditCtx>({ selectedPhotoId: null });
+
 /* ============================================================
  *  照片形状工具
  *  - 'rect'    : 保持版式容器比例，不裁剪（默认）
@@ -29,14 +68,34 @@ const PhotoFrameColorContext = createContext<string | null | undefined>(undefine
  *    否则图案会被拉扁。此时 ShapeMask 会把自身收成正方形并居中，
  *    保证容器为长方形时形状仍然标准。
  * ============================================================ */
+/**
+ * 形状裁切定义。所有形状必须满足：
+ *  1. 顶点用百分比 → 任意尺寸都能缩放
+ *  2. 留出 ~3% 安全边距，避免贴边被父容器/边框吃掉
+ *  3. 视觉重心居中（heart 经过下移补偿，避免上半截贴顶）
+ */
 const CLIP_PATH_MAP: Partial<Record<PhotoShape, string>> = {
-  // 心形（来自通用 SVG path，常见稳定写法）
+  // 心形：用 28 个点的 polygon 近似贝塞尔，整图占满 [3%, 97%]，底尖在 96%
+  // 避免原 path() 绝对像素导致随尺寸错位的问题
   heart:
-    "path('M 100 190 C 50 150 15 120 15 80 C 15 50 40 25 70 25 C 85 25 95 35 100 50 C 105 35 115 25 130 25 C 160 25 185 50 185 80 C 185 120 150 150 100 190 Z')",
-  // 五角星
-  star: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)',
+    'polygon(50% 96%, 6% 53%, 4% 38%, 9% 22%, 22% 12%, 36% 12%, 46% 18%, 50% 26%, 54% 18%, 64% 12%, 78% 12%, 91% 22%, 96% 38%, 94% 53%)',
+  // 五角星：上下左右严格对称，整图内缩至 [4%, 96%]，让边框/选中态有缓冲
+  star:
+    'polygon(50% 4%, 61% 36%, 95% 36%, 68% 57%, 78% 92%, 50% 71%, 22% 92%, 32% 57%, 5% 36%, 39% 36%)',
   // 正六边形（flat-top）
-  hexagon: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+  hexagon: 'polygon(25% 2%, 75% 2%, 98% 50%, 75% 98%, 25% 98%, 2% 50%)',
+};
+
+/**
+ * 与 CLIP_PATH_MAP 同源的 SVG path/points，用来在异形上叠加描边。
+ * polygon 用 points，circle/rounded 走原生 stroke。
+ */
+const SHAPE_SVG_POLYGON: Partial<Record<PhotoShape, string>> = {
+  heart:
+    '50,96 6,53 4,38 9,22 22,12 36,12 46,18 50,26 54,18 64,12 78,12 91,22 96,38 94,53',
+  star:
+    '50,4 61,36 95,36 68,57 78,92 50,71 22,92 32,57 5,36 39,36',
+  hexagon: '25,2 75,2 98,50 75,98 25,98 2,50',
 };
 
 /** 是否需要强制 1:1 的形状 */
@@ -69,17 +128,25 @@ function isTemplateStyle(v: unknown): v is TemplateStyle {
  * - heart/star/hexagon: clip-path + 强制 1:1
  *
  * 当父容器不是 1:1 时，ShapeMask 会把自己 inset 到正方形尺寸并居中。
+ *
+ * borderColor：可选，给异形/圆形叠加一层描边
+ *   - circle/rounded: 原生 outline 模拟
+ *   - heart/star/hexagon: 在上方叠一个绝对定位的 SVG，stroke 同形 path
  */
 function ShapeMask({
   shape,
   children,
   extraStyle,
   extraClassName = '',
+  borderColor,
+  borderWidth = 3,
 }: {
   shape?: PhotoShape;
   children: ReactNode;
   extraStyle?: CSSProperties;
   extraClassName?: string;
+  borderColor?: string | null;
+  borderWidth?: number;
 }) {
   if (!shape || shape === 'rect') {
     return (
@@ -92,13 +159,17 @@ function ShapeMask({
     return (
       <div
         className={`w-full h-full overflow-hidden ${extraClassName}`}
-        style={{ borderRadius: '18%', ...extraStyle }}
+        style={{
+          borderRadius: '18%',
+          border: borderColor ? `${borderWidth}px solid ${borderColor}` : undefined,
+          ...extraStyle,
+        }}
       >
         {children}
       </div>
     );
   }
-  // 非矩形异形：强制 1:1 + 居中（aspect-square 配合 max-w/max-h 实现）
+  // 非矩形异形：强制 1:1 + 居中
   const clip = CLIP_PATH_MAP[shape];
   const baseStyle: CSSProperties = {
     aspectRatio: '1 / 1',
@@ -107,21 +178,50 @@ function ShapeMask({
     WebkitClipPath: clip,
     ...extraStyle,
   };
+  // 描边：异形（heart/star/hexagon）用同形 SVG 叠在上方；circle 直接 box-shadow inset
+  const polyPoints = SHAPE_SVG_POLYGON[shape];
   // 外层用 flex 居中 + 内层自适应为正方形（取 min(宽, 高)）
   return (
     <div className={`w-full h-full flex items-center justify-center ${extraClassName}`}>
       <div
-        className="overflow-hidden"
+        className="relative"
         style={{
-          // 让正方形取父容器宽高的较小者
           height: '100%',
           width: 'auto',
           maxWidth: '100%',
           maxHeight: '100%',
-          ...baseStyle,
+          aspectRatio: '1 / 1',
         }}
       >
-        {children}
+        <div className="overflow-hidden w-full h-full" style={baseStyle}>
+          {children}
+        </div>
+        {borderColor && shape === 'circle' && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              borderRadius: '50%',
+              border: `${borderWidth}px solid ${borderColor}`,
+            }}
+          />
+        )}
+        {borderColor && polyPoints && (
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+          >
+            <polygon
+              points={polyPoints}
+              fill="none"
+              stroke={borderColor}
+              strokeWidth={borderWidth}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        )}
       </div>
     </div>
   );
@@ -152,6 +252,24 @@ interface Props {
    * null / undefined 表示跟随模板默认；十六进制串则覆盖所有 style 的主边色。
    */
   photoFrameColor?: string | null;
+  /**
+   * 当用户在编辑器选中某张照片后，拖动该照片调整画面焦点（object-position）时触发。
+   * 仅在编辑器里传；纯展示态忽略即可。
+   * 内部会换算为 focus 百分比（0~100）增量并应用到 BookPage.photoFocus[slot]。
+   */
+  onAdjustFocus?: (
+    photoId: string,
+    info: {
+      dx: number;
+      dy: number;
+      containerW: number;
+      containerH: number;
+      naturalW: number;
+      naturalH: number;
+      startFocus: PhotoFocus;
+      zoom: number;
+    },
+  ) => void;
 }
 
 /**
@@ -159,7 +277,7 @@ interface Props {
  * 按 template.style 走完全不同的视觉骨架：
  *   watercolor / cartoon / minimal / vintage / festival-cn / festival-xmas
  */
-function PageViewInner({ page, photos, template, babyName, dateRange, width, height, onSelectPhoto, selectedPhotoId, photoFrameColor }: Props) {
+function PageViewInner({ page, photos, template, babyName, dateRange, width, height, onSelectPhoto, selectedPhotoId, photoFrameColor, onAdjustFocus }: Props) {
   const photoMap = new Map(photos.map((p) => [p.id, p]));
   // src → photoId 反查表：点击 <img> 时靠 src 反查 photoId（浏览器 img.src 会返回绝对 URL，
   // 但 dataURL/blob/相对路径我们都完整保存在 Photo.src 里，所以用 endsWith 做兜底匹配）。
@@ -183,6 +301,14 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
     const slot = slotOfPagePhoto.get(photo.id);
     if (slot == null) return undefined;
     return page.photoShapes?.[slot];
+  };
+
+  /** 取给定 photo 的焦点（同样按 slot 对应到 page.photoFocus）。 */
+  const focusFor = (photo?: Photo): PhotoFocus | undefined => {
+    if (!photo) return undefined;
+    const slot = slotOfPagePhoto.get(photo.id);
+    if (slot == null) return undefined;
+    return page.photoFocus?.[slot];
   };
 
   const { colors, fontFamily, backgroundPattern } = template;
@@ -235,19 +361,21 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
   const editable = !!onSelectPhoto;
 
   // 编辑模式：点击图片 → onSelectPhoto(photoId)；点击空白 → onSelectPhoto(null)
+  // 兼容两种渲染：<img data-photo-id> 与 <div data-photo-id>（cover 背景方案）
   const handleImgClick = editable
     ? (e: ReactMouseEvent<HTMLDivElement>) => {
         const target = e.target as HTMLElement;
-        const imgEl = target.closest('img') as HTMLImageElement | null;
-        if (!imgEl) {
+        const photoEl = target.closest('[data-photo-id]') as HTMLElement | null;
+        if (!photoEl) {
           // 点击的是空白区域：取消选中
           onSelectPhoto!(null);
           return;
         }
-        // 优先用 dataset.photoId（精准），再退回到按 src 反查
-        const datasetId = imgEl.dataset.photoId;
+        // 优先用 dataset.photoId（精准），再退回到按 src 反查（仅 <img> 适用）
+        const datasetId = photoEl.dataset.photoId;
         let pid = datasetId;
-        if (!pid) {
+        if (!pid && photoEl.tagName === 'IMG') {
+          const imgEl = photoEl as HTMLImageElement;
           // img.src 在浏览器里可能被解析成绝对 URL；dataURL/blob: 不会变
           const rawSrc = imgEl.getAttribute('src') ?? '';
           pid = srcToId.get(rawSrc) ?? srcToId.get(imgEl.src);
@@ -265,18 +393,19 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
   // 配合 CSS 让选中图片高亮、其他图片降亮。
   const selectedAttr = selectedPhotoId ?? undefined;
 
-  // 把"被选中"这个状态直接标注到对应 <img> 节点上（data-selected="true"），
+  // 把"被选中"这个状态直接标注到对应节点上（data-selected="true"），
   // 以便 CSS 用 [data-selected] 选择器命中它，无需让每个版式子组件都感知选中 id。
+  // 兼容 <img data-photo-id> 与 <div data-photo-id>（cover 背景方案）。
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const imgs = root.querySelectorAll<HTMLImageElement>('img[data-photo-id]');
-    imgs.forEach((im) => {
-      if (selectedAttr && im.dataset.photoId === selectedAttr) {
-        im.dataset.selected = 'true';
+    const nodes = root.querySelectorAll<HTMLElement>('[data-photo-id]');
+    nodes.forEach((el) => {
+      if (selectedAttr && el.dataset.photoId === selectedAttr) {
+        el.dataset.selected = 'true';
       } else {
-        delete im.dataset.selected;
+        delete el.dataset.selected;
       }
     });
   });
@@ -295,6 +424,13 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
       {/* 按版式渲染（使用降级后的 resolvedLayout，保证永不空白） */}
       <PhotoFrameColorContext.Provider value={photoFrameColor ?? null}>
       <PhotoShapeContext.Provider value={shapeFor}>
+      <PhotoFocusContext.Provider value={focusFor}>
+      <FocusEditContext.Provider
+        value={{
+          selectedPhotoId: selectedPhotoId ?? null,
+          onDragMove: onAdjustFocus,
+        }}
+      >
       {resolvedLayout === 'cover' && (
         <CoverLayout
           photo={pagePhotos[0]}
@@ -339,6 +475,8 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
       {resolvedLayout === 'grid6' && pagePhotos.length >= 6 && (
         <Grid6Layout photos={pagePhotos} caption={page.caption} template={template} variantOverride={page.variant} />
       )}
+      </FocusEditContext.Provider>
+      </PhotoFocusContext.Provider>
       </PhotoShapeContext.Provider>
       </PhotoFrameColorContext.Provider>
 
@@ -366,7 +504,8 @@ export const PageView = memo(PageViewInner, (prev, next) => {
     prev.height === next.height &&
     prev.onSelectPhoto === next.onSelectPhoto &&
     prev.selectedPhotoId === next.selectedPhotoId &&
-    prev.photoFrameColor === next.photoFrameColor
+    prev.photoFrameColor === next.photoFrameColor &&
+    prev.onAdjustFocus === next.onAdjustFocus
   );
 });
 
@@ -547,7 +686,16 @@ function CoverPlaceholder({ template, title }: { template: Template; title?: str
 }
 
 /* ============================================================
- *  图片加载兜底：加载失败时渲染占位块，避免空白相框
+ *  图片加载兜底 + 焦点拖拽：
+ *  - 加载失败时渲染占位块，避免空白相框
+ *  - cover 模式下使用 div + background-image 渲染：自己计算
+ *    `background-size = (iw*s*z, ih*s*z)`（s=cover 缩放，z=FOCUS_ZOOM），
+ *    使横/纵两个轴都有 slack > 0。这样切到圆/心/星等异形相框后，
+ *    用户可以任意方向拖动调整画面焦点（object-position）。
+ *  - contain 模式仍用 <img>，object-fit: contain 保留留白，无需拖动。
+ *  - 通过 PhotoFocusContext 应用 background-position
+ *  - 当处于编辑器选中态（FocusEditContext 命中且本图被选中）时
+ *    支持鼠标/触屏按下拖动来调整焦点
  * ============================================================ */
 function SafeImg({
   src,
@@ -567,6 +715,81 @@ function SafeImg({
   photoId?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  // 自然尺寸：cover 模式下用于精确算 background-size 与 slack
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const focusFromCtx = useContext(PhotoFocusContext);
+  const { selectedPhotoId, onDragMove } = useContext(FocusEditContext);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // 取该图焦点；缺省居中。仅在 cover 模式下需要（contain 不会裁切，无需调整）。
+  const focus =
+    photoId && fit === 'cover'
+      ? (focusFromCtx({ id: photoId } as unknown as Photo) ?? { x: 50, y: 50 })
+      : { x: 50, y: 50 };
+
+  // 是否进入"可拖拽调整焦点"态：编辑器里选中了这张图，且 fit=cover
+  const draggable =
+    !!photoId && !!selectedPhotoId && photoId === selectedPhotoId && !!onDragMove && fit === 'cover';
+
+  /**
+   * cover 之上的额外放大系数（FOCUS_ZOOM）：
+   * 纯 cover 时只有"长出来的那一轴"会被裁切，另一轴 slack=0，
+   * 表现为只能单方向拖动；尤其方图放进 1:1 相框时两个方向都拖不动。
+   * 在 cover 之上再放大 15%，两个轴都会有 ≥(z-1)*容器尺寸 的可滑动量，
+   * 用户切换形状后能任意方向微调画面。
+   */
+  const FOCUS_ZOOM = fit === 'cover' ? 1.15 : 1;
+
+  // 拖拽事件：pointerdown 起，pointermove/up 跟踪整段位移并持续派发增量
+  function handlePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!draggable || !photoId || !onDragMove) return;
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const rect = containerEl.getBoundingClientRect();
+    const containerW = rect.width;
+    const containerH = rect.height;
+    const naturalW = natural?.w ?? 1;
+    const naturalH = natural?.h ?? 1;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startFocus: PhotoFocus = { x: focus.x, y: focus.y };
+
+    try {
+      containerEl.setPointerCapture(e.pointerId);
+    } catch {
+      /* 忽略 */
+    }
+
+    const onMove = (ev: PointerEvent) => {
+      onDragMove(photoId, {
+        dx: ev.clientX - startX,
+        dy: ev.clientY - startY,
+        containerW,
+        containerH,
+        naturalW,
+        naturalH,
+        startFocus,
+        zoom: FOCUS_ZOOM,
+      });
+    };
+    const onUp = (ev: PointerEvent) => {
+      try {
+        containerEl.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* 忽略 */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
   if (!src || failed) {
     return (
       <div className={`h-full w-full ${className}`} style={style}>
@@ -574,25 +797,164 @@ function SafeImg({
       </div>
     );
   }
-  const objectFitClass = fit === 'contain' ? 'object-contain' : 'object-cover';
+
+  // contain 模式：仍走 <img>，object-fit:contain 保留留白
+  if (fit === 'contain') {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        loading="eager"
+        decoding="async"
+        draggable={false}
+        data-photo-id={photoId}
+        className={`h-full w-full object-contain ${className}`}
+        style={style}
+        onError={() => setFailed(true)}
+        ref={(el) => {
+          if (el && el.decode) {
+            el.decode().catch(() => {});
+          }
+        }}
+      />
+    );
+  }
+
+  /**
+   * cover 模式：把渲染逻辑下沉到 SafeImgCoverInner，
+   * 它内部用 ResizeObserver 测容器尺寸，配合 natural 像素值
+   * 把 background-size 算成 cover * FOCUS_ZOOM 的精确像素，
+   * 使横/纵两个轴都有 slack > 0，配合 background-position 实现拖动调焦。
+   */
   return (
-    <img
+    <SafeImgCoverInner
       src={src}
       alt={alt}
-      loading="eager"
-      decoding="async"
-      draggable={false}
-      data-photo-id={photoId}
-      className={`h-full w-full ${objectFitClass} ${className}`}
+      photoId={photoId}
+      className={className}
       style={style}
-      onError={() => setFailed(true)}
-      // 尽早触发 decode，避免翻页时才首次解码导致跳动
-      ref={(el) => {
-        if (el && el.decode) {
-          el.decode().catch(() => {});
-        }
-      }}
+      focus={focus}
+      zoom={FOCUS_ZOOM}
+      draggable={draggable}
+      containerRef={containerRef}
+      handlePointerDown={handlePointerDown}
+      onLoad={(w, h) => setNatural({ w, h })}
+      onFail={() => setFailed(true)}
+      natural={natural}
     />
+  );
+}
+
+/**
+ * cover 模式真正负责渲染的子组件。把 ResizeObserver / 加载兜底逻辑
+ * 收敛在这里，让上层 SafeImg 函数体保持紧凑。
+ */
+function SafeImgCoverInner(props: {
+  src: string;
+  alt: string;
+  photoId?: string;
+  className: string;
+  style?: CSSProperties;
+  focus: PhotoFocus;
+  zoom: number;
+  draggable: boolean;
+  containerRef: MutableRefObject<HTMLDivElement | null>;
+  handlePointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onLoad: (w: number, h: number) => void;
+  onFail: () => void;
+  natural: { w: number; h: number } | null;
+}) {
+  const {
+    src,
+    alt,
+    photoId,
+    className,
+    style,
+    focus,
+    zoom,
+    draggable,
+    containerRef,
+    handlePointerDown,
+    onLoad,
+    onFail,
+    natural,
+  } = props;
+
+  // 测量容器实际宽高，结合自然尺寸算 background-size 的像素值
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        setSize({ w: r.width, h: r.height });
+      }
+    };
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    return undefined;
+    // containerRef 是 ref，不算依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 计算 background-size 像素值：cover 缩放 × zoom
+  let backgroundSize: string = 'cover';
+  if (natural && size && natural.w > 0 && natural.h > 0 && size.w > 0 && size.h > 0) {
+    const coverScale = Math.max(size.w / natural.w, size.h / natural.h);
+    const s = coverScale * zoom;
+    const bgW = natural.w * s;
+    const bgH = natural.h * s;
+    backgroundSize = `${bgW}px ${bgH}px`;
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative h-full w-full overflow-hidden ${className}`}
+      style={{
+        ...(style ?? {}),
+        ...(draggable ? { cursor: 'grab', touchAction: 'none' as const } : null),
+      }}
+      data-photo-id={photoId}
+      data-focus-draggable={draggable ? 'true' : undefined}
+      onPointerDown={draggable ? handlePointerDown : undefined}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `url("${src}")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundSize,
+          backgroundPosition: `${focus.x}% ${focus.y}%`,
+        }}
+      />
+      {/* 隐形 img：用于读 naturalWidth/Height + 触发加载失败兜底 */}
+      <img
+        src={src}
+        alt={alt}
+        aria-hidden
+        draggable={false}
+        decoding="async"
+        loading="eager"
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          opacity: 0,
+          pointerEvents: 'none',
+        }}
+        onLoad={(ev) => {
+          const el = ev.currentTarget;
+          onLoad(el.naturalWidth || 1, el.naturalHeight || 1);
+        }}
+        onError={onFail}
+      />
+    </div>
   );
 }
 
@@ -632,14 +994,28 @@ function PhotoFrame({
   // 用户对图片边框颜色的覆盖（优先级高于 style 默认值）
   const frameColorOverride = useContext(PhotoFrameColorContext) || null;
 
-  // —— 异形：不套 style 相框，直接对 img 整形（保证形状干净） ——
+  // —— 异形：不套 style 相框，直接对 img 整形（保证形状干净），但要给一层描边作为相框 ——
   if (shape && shapeForcesSquare(shape)) {
+    // 描边色：用户覆盖优先；否则按当前 style 取一个合适的主边色
+    const isDarkPaper =
+      template.colors.paper.startsWith('#1') ||
+      template.colors.paper.startsWith('#2') ||
+      template.colors.paper.startsWith('#3');
+    const styleDefaultBorder =
+      style === 'vintage'
+        ? isDarkPaper
+          ? '#F2E7D0'
+          : '#FFFEF7'
+        : style === 'minimal'
+          ? `${colors.accent}88`
+          : colors.primary;
+    const strokeColor = frameColorOverride ?? styleDefaultBorder;
     return (
       <div
         className={`${className}`}
         style={{ transform: rotate ? `rotate(${rotate}deg)` : undefined }}
       >
-        <ShapeMask shape={shape}>
+        <ShapeMask shape={shape} borderColor={strokeColor} borderWidth={3}>
           <SafeImg src={photo.src} template={template} fit="cover" photoId={photo.id} />
         </ShapeMask>
       </div>

@@ -20,6 +20,31 @@ export function BookDetailPage() {
   const [exporting, setExporting] = useState(false);
   const [exportHint, setExportHint] = useState<string | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const fullscreenRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // 监听全屏状态（处理 ESC 退出 / 浏览器自身退出）
+  useEffect(() => {
+    const onChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  async function toggleFullscreen() {
+    const el = fullscreenRef.current;
+    if (!el) return;
+    try {
+      if (!document.fullscreenElement) {
+        await el.requestFullscreen({ navigationUI: 'hide' } as FullscreenOptions);
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (e) {
+      console.error('fullscreen toggle failed', e);
+    }
+  }
 
   // 加载画册
   useEffect(() => {
@@ -193,6 +218,8 @@ export function BookDetailPage() {
     <div className="mx-auto max-w-6xl px-4 py-6 book-detail-root">
       {/* 打印专用样式（仅打印时生效） */}
       <style>{PRINT_CSS}</style>
+      {/* 全屏预览样式 */}
+      <style>{FULLSCREEN_CSS}</style>
 
       {/* 工具栏 */}
       <div className="flex items-center justify-between gap-3 mb-5 flex-wrap no-print">
@@ -208,6 +235,9 @@ export function BookDetailPage() {
             ✎ 编辑画册
           </ToolBtn>
           <ToolBtn onClick={shareBook}>分享</ToolBtn>
+          <ToolBtn onClick={toggleFullscreen}>
+            {isFullscreen ? '退出全屏' : '全屏预览'}
+          </ToolBtn>
           <ToolBtn onClick={exportCurrentPage} disabled={exporting}>
             保存当前页
           </ToolBtn>
@@ -233,11 +263,15 @@ export function BookDetailPage() {
         </div>
       )}
 
-      {/* 主视图（使用共用翻页组件） */}
+      {/* 主视图（使用共用翻页组件）—— 同时作为全屏容器 */}
       <div
-        className="no-print"
-        onDoubleClick={() => navigate(`/book/${book!.id}/edit`)}
-        title="双击进入编辑器"
+        ref={fullscreenRef}
+        className={`no-print book-stage-wrap ${isFullscreen ? 'is-fullscreen' : ''}`}
+        onDoubleClick={() => {
+          if (isFullscreen) return; // 全屏下双击不进编辑器，避免误触
+          navigate(`/book/${book!.id}/edit`);
+        }}
+        title={isFullscreen ? '' : '双击进入编辑器'}
       >
         <BookFlip
           book={book}
@@ -247,6 +281,17 @@ export function BookDetailPage() {
           stageRef={pageRef}
           minStageHeight="60vh"
         />
+        {isFullscreen && (
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="fs-exit-btn"
+            aria-label="退出全屏"
+            title="退出全屏（Esc）"
+          >
+            ✕ 退出全屏
+          </button>
+        )}
       </div>
       <div className="text-center text-xs text-neutral-400 mt-1 no-print">
         提示：点击上方「编辑画册」或双击画面进入编辑器，可修改文字、排版、配色与字体
@@ -313,6 +358,68 @@ function formatDate(ts: number) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+/**
+ * 全屏预览样式：
+ *  - 触发方式：BookDetailPage 工具栏点击「全屏预览」→ requestFullscreen() 整个 .book-stage-wrap
+ *  - 浏览器原生全屏会自动覆盖整个屏幕，但内部子元素仍按原 CSS 渲染。
+ *    这里我们额外做两件事：
+ *      1) 让 .book-stage-wrap 在全屏下铺满（width/height 100%、纯黑底色避免周边露白）
+ *      2) BookFlip 内部 .bookflip-stage 的 max-w-3xl 在全屏下解除，让对开尽量撑大
+ *  - 通过 :fullscreen 伪类 + .is-fullscreen 兜底两路触发，保证兼容性。
+ */
+const FULLSCREEN_CSS = `
+.book-stage-wrap { position: relative; }
+/* 全屏容器自身：占满屏幕、纯黑背景、内容上下居中、可纵向滚动以兜底 */
+.book-stage-wrap:fullscreen,
+.book-stage-wrap.is-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  padding: 0;
+  overflow: auto;
+}
+/* 注意：不要给 .book-stage-wrap 的直接子 div 强加 width/height/flex，
+   因为 BookFlip 根节点内部是「主视图 + 页码 + 缩略图条」三段纵向堆叠，
+   一旦外层强行 flex 居中或 100vh，就会把对开页压成一条。
+   这里我们只通过 .bookflip-stage 这个对开舞台自己来撑大尺寸。 */
+
+/* 全屏下让翻书舞台按视口高度反推宽度，保证对开 3:2 完整可见：
+   - 高度上限：减去外层 padding（p-4/p-8） + 页码一行 ≈ 110px（缩略图条已隐藏，不再扣它的高）
+   - 宽度上限：96vw
+   取两者最小值，再乘 1.5（3:2 = 宽:高）反推宽度 */
+.book-stage-wrap:fullscreen .bookflip-stage,
+.book-stage-wrap.is-fullscreen .bookflip-stage {
+  max-width: min(96vw, calc((100vh - 110px) * 1.5)) !important;
+}
+/* 全屏下隐藏缩略图条（BookFlip 根节点里以 scrollbar-hide 为标识的横向滚动条） */
+.book-stage-wrap:fullscreen [class*="scrollbar-hide"],
+.book-stage-wrap.is-fullscreen [class*="scrollbar-hide"] {
+  display: none !important;
+}
+/* 全屏下页码文字反白，避免黑底看不清 */
+.book-stage-wrap:fullscreen .text-neutral-600,
+.book-stage-wrap.is-fullscreen .text-neutral-600 {
+  color: #e5e5e5 !important;
+}
+/* 退出全屏按钮（仅在全屏时显示） */
+.fs-exit-btn {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 13px;
+  border: 1px solid rgba(255,255,255,0.25);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background .15s;
+}
+.fs-exit-btn:hover { background: rgba(0,0,0,0.75); }
+`;
 
 /**
  * 打印样式：
