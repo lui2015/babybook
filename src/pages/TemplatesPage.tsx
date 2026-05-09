@@ -277,7 +277,8 @@ export function TemplatesPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        navigate(`/create?templateId=${encodeURIComponent(t.id)}`)
+                        // auto=1：用户已明确选定模板，照片传够后无需再次确认模板
+                        navigate(`/create?templateId=${encodeURIComponent(t.id)}&auto=1`)
                       }
                       className="shrink-0 text-xs px-2.5 py-1 rounded-full bg-neutral-900 text-white hover:opacity-90"
                     >
@@ -317,7 +318,8 @@ export function TemplatesPage() {
         onClose={() => setPreviewTpl(null)}
         onUse={(tpl) => {
           setPreviewTpl(null);
-          navigate(`/create?templateId=${encodeURIComponent(tpl.id)}`);
+          // auto=1：和卡片双击/卡片右下角"使用"保持一致——上传够 6 张后自动跳过选模板步
+          navigate(`/create?templateId=${encodeURIComponent(tpl.id)}&auto=1`);
         }}
       />
     </div>

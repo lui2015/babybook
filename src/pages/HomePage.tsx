@@ -179,7 +179,8 @@ export function HomePage() {
         onClose={() => setPreviewTpl(null)}
         onUse={(tpl) => {
           setPreviewTpl(null);
-          navigate(`/create?templateId=${encodeURIComponent(tpl.id)}`);
+          // auto=1：上传步骤完成（≥6 张照片）后自动跳过"选模板"步骤直接生成画册
+          navigate(`/create?templateId=${encodeURIComponent(tpl.id)}&auto=1`);
         }}
       />
 

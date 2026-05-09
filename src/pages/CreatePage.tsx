@@ -32,16 +32,19 @@ export function CreatePage() {
       const tpl = getTemplate(urlTemplateId);
       if (tpl) {
         draft.setTemplateId(tpl.id);
-        setPresetHint(tpl.name);
         // 双击直达：照片已就绪则一步跳到「生成预览」
         if (urlAuto) {
           if (draft.photos.length >= 6) {
+            // 直接进入生成步，无需再展示"已预选模板"提示（语义已被生成步本身覆盖）
             setStep('generate');
           } else {
+            setPresetHint(tpl.name);
             setAutoSkipHint(
               `请先上传至少 6 张照片，之后会自动用「${tpl.name}」生成画册预览。`,
             );
           }
+        } else {
+          setPresetHint(tpl.name);
         }
       }
     }
