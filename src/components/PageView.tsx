@@ -23,6 +23,14 @@ const PhotoFrameColorContext = createContext<string | null | undefined>(undefine
 const PhotoFocusContext = createContext<(photo: Photo) => PhotoFocus | undefined>(() => undefined);
 
 /**
+ * 页面渲染的"设计基准尺寸"——所有版式内的 px 数值（字号、间距、边框、icon 大小）
+ * 都按这个尺寸调试。任何上层（缩略图 / 主预览 / PDF 导出）只需把它当作一张
+ * 720 × 960 的"原图"，再按需缩放到自己的容器，就能保证视觉一致。
+ */
+const BASE_PAGE_W = 720;
+const BASE_PAGE_H = 960;
+
+/**
  * 编辑器拖拽相关：
  * - 是否处于"可拖拽调整焦点"模式（即用户正点选了某张照片）
  * - 当前选中的照片 id
@@ -358,15 +366,28 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
         }
       : page;
 
+  // 关键：所有版式内的 px 数值（字号、padding、border 等）都是按
+  // "720 × 960 的设计基准"调出来的（与 exportPdf.tsx 中 RENDER_W/H 一致，
+  // 也与 types.ts 中 OverlayText.fontSize 注释一致）。
+  // 因此这里固定让"页面内容"以 720 × 960 渲染，再由外层 ScaledStage
+  // 用 transform: scale 把它缩放到父容器实际尺寸。这样左侧 ~104px 的缩略图
+  // 与中央 ~440px 的主预览 视觉上完全等比，且导出（720×960）像素级对齐。
+  const fixedRender = !!(width && height); // 导出路径：禁用 scale，直接 1:1
+  // 文字字号倍率（CSS 变量），由本页 page.titleScale / subtitleScale / captionScale 驱动；
+  // 各 layout 子组件在标题/副标题/正文渲染处加 data-pv-text 标记，由全局 CSS 应用 zoom。
+  const clampScale = (v: number | undefined) =>
+    Math.max(0.6, Math.min(1.8, typeof v === 'number' && Number.isFinite(v) ? v : 1));
   const pageStyle: CSSProperties = {
     background: backgroundPattern
       ? `${backgroundPattern}, ${colors.paper}`
       : colors.paper,
     color: colors.text,
     fontFamily: fontFamily.body,
-    width: width ? `${width}px` : '100%',
-    height: height ? `${height}px` : '100%',
-    aspectRatio: width && height ? undefined : '3 / 4',
+    width: fixedRender ? `${width}px` : `${BASE_PAGE_W}px`,
+    height: fixedRender ? `${height}px` : `${BASE_PAGE_H}px`,
+    ['--pv-zoom-title' as any]: clampScale(page.titleScale),
+    ['--pv-zoom-subtitle' as any]: clampScale(page.subtitleScale),
+    ['--pv-zoom-caption' as any]: clampScale(page.captionScale),
   };
 
   const editable = !!onSelectPhoto;
@@ -426,7 +447,65 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
     });
   });
 
-  return (
+  // 文字字号倍率：基于"渲染后内容匹配"自动给标题/副标题/正文元素打 data-pv-text 标记。
+  // 不入侵 14 种版式子组件的 JSX：扫描根容器内所有元素，找出直接文本子节点恰好等于
+  // page.title / subtitle / caption 的那一个元素，命中即打标记，由全局 CSS 应用 zoom。
+  // 之所以匹配"直接文本"而不是 textContent：避免父级 wrapper 误命中（其 textContent 也含子节点）。
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    // 先清掉旧标记（页码切换 / page 切换时要重置）
+    const prev = root.querySelectorAll<HTMLElement>('[data-pv-text]');
+    prev.forEach((el) => {
+      delete el.dataset.pvText;
+    });
+
+    // 取出本页有效的待匹配文本（兼容 fallbackPage：text 兜底版式会替换 title/caption）
+    const titles = [page.title, fallbackPage.title].filter(
+      (s): s is string => typeof s === 'string' && s.trim().length > 0,
+    );
+    const subtitles = [page.subtitle, fallbackPage.subtitle].filter(
+      (s): s is string => typeof s === 'string' && s.trim().length > 0,
+    );
+    const captions = [page.caption, fallbackPage.caption].filter(
+      (s): s is string => typeof s === 'string' && s.trim().length > 0,
+    );
+
+    if (titles.length === 0 && subtitles.length === 0 && captions.length === 0) return;
+
+    // 取元素的"直接文本"：仅拼接直接子节点中的 text node；
+    // 这样可以区分 <h1>{title}</h1> 与 <div>{title}<span>…</span></div>
+    // 后者直接文本 = title 也算命中（因为 title 仍是其直接子节点的全部文本之一）；
+    // 但前者更精确，多数版式都是这种简洁结构。
+    const directText = (el: Element) => {
+      let s = '';
+      el.childNodes.forEach((n) => {
+        if (n.nodeType === Node.TEXT_NODE) s += n.nodeValue ?? '';
+      });
+      return s.trim();
+    };
+
+    const all = root.querySelectorAll<HTMLElement>('*');
+    // 跳过 OverlayLayer 内部（OverlayText 有自己的 fontSize，不参与本页字段倍率）
+    const isInsideOverlay = (el: Element) => !!el.closest('[data-overlay-id]');
+
+    all.forEach((el) => {
+      if (el.dataset.pvText) return; // 已被打过标记的不重复
+      if (isInsideOverlay(el)) return;
+      const t = directText(el);
+      if (!t) return;
+      if (titles.some((x) => x.trim() === t)) {
+        el.dataset.pvText = 'title';
+      } else if (subtitles.some((x) => x.trim() === t)) {
+        el.dataset.pvText = 'subtitle';
+      } else if (captions.some((x) => x.trim() === t)) {
+        el.dataset.pvText = 'caption';
+      }
+    });
+  });
+
+  const pageNode = (
     <div
       ref={rootRef}
       className={`relative overflow-hidden shadow-book rounded-md ${editable ? 'pv-editable' : ''}${selectedAttr ? ' pv-has-selection' : ''}`}
@@ -512,6 +591,81 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
       {resolvedLayout === 'text' && <TextLayout page={fallbackPage} template={template} />}
 
       {resolvedLayout === 'ending' && <EndingLayout page={page} template={template} babyName={babyName} />}
+    </div>
+  );
+
+  // 导出路径（width && height 已传入）：固定像素尺寸直接渲染，无需缩放
+  if (fixedRender) return pageNode;
+
+  // 普通预览路径：用 ScaledStage 把 720×960 的"原图"等比缩放到父容器
+  return <ScaledStage>{pageNode}</ScaledStage>;
+}
+
+/**
+ * ScaledStage —— 把内部以 BASE_PAGE_W × BASE_PAGE_H 渲染的页面
+ * 按父容器实际宽度等比 transform: scale 到位。
+ *
+ * 为什么要这么做：
+ *   PageView 内部所有版式的 px 数值（字号 64/84/92、内边距、边框、SVG 装饰）
+ *   都是按 720 × 960 的设计基准调出来的。如果直接 width:100% 让它撑到
+ *   ~104px 的缩略图里，文字就成了"巨型字"；撑到 ~440px 的主预览又是另一个尺寸。
+ *   所以唯一让左/中/导出三处视觉一致的办法，就是固定基准、整体缩放。
+ *
+ * 实现细节：
+ *   - 外层 div 设 aspectRatio: 3/4，保证占位高度正确（Flex/Grid 友好）。
+ *   - ResizeObserver 测量外层实际宽度 → 算出 scale = realW / BASE_PAGE_W。
+ *   - 内层 div transform-origin: top left + scale，并把 width/height 反向放大成
+ *     设计基准尺寸：父级实际占位 = BASE × scale = realW，刚好填满。
+ *   - 没有有效宽度（初始 / 隐藏）时 scale 兜底为 1，不至于把内容挤成 0。
+ */
+function ScaledStage({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      if (w > 0) setScale(w / BASE_PAGE_W);
+    };
+    update();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(update);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    // 浏览器不支持时退到 window resize，不至于完全不响应
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        aspectRatio: '3 / 4',
+        // 不用 overflow:hidden —— 让 OverlayLayer 的拖拽手柄等
+        // 在编辑模式下可以稍微溢出页面边缘也能被点中；
+        // 子层 PageView 自身已经 overflow:hidden 限制内容裁剪。
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: `${BASE_PAGE_W}px`,
+          height: `${BASE_PAGE_H}px`,
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left',
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }

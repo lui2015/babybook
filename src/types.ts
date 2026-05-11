@@ -128,6 +128,14 @@ export interface BookPage {
   subtitle?: string;
   caption?: string;
   /**
+   * 文字字号倍率（仅作用于本页对应字段），1 = 模板默认。
+   * 用户在「文字」Tab 中为每个字段单独调节。范围 0.6 ~ 1.8。
+   * 通过 CSS zoom 实现，对所有版式下该字段及其相邻装饰自动等比缩放。
+   */
+  titleScale?: number;
+  subtitleScale?: number;
+  captionScale?: number;
+  /**
    * 多图版式的骨架变体（double/triple/grid4/grid5/grid6）。
    * 不填则继承 template.layoutVariants 的选择。
    * 由编辑器逐页设定。

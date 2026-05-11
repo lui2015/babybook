@@ -64,10 +64,20 @@ export function MyBooksPage() {
       >
         <span>
           {isAuthenticated ? (
-            <>
-              ☁️ <b style={{ color: 'var(--bb-fg)' }}>{user?.displayName}</b>
-              ，画册自动保存在云端，下次用同一浏览器打开仍可访问。
-            </>
+            user?.isAnonymous ? (
+              <>
+                ☁️ <b style={{ color: 'var(--bb-fg)' }}>{user?.displayName}</b>
+                ，画册保存在云端，下次用同一浏览器打开仍可见。
+                <span style={{ color: 'var(--bb-primary)' }}>
+                  {' '}升级为正式账号后即可在其他设备访问。
+                </span>
+              </>
+            ) : (
+              <>
+                ☁️ <b style={{ color: 'var(--bb-fg)' }}>{user?.displayName}</b>
+                ，画册已绑定到你的账号，可在任意设备登录访问。
+              </>
+            )
           ) : (
             <>💾 云端账户初始化中，画册暂存本机…</>
           )}

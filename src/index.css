@@ -426,3 +426,19 @@ body {
   cursor: grabbing !important;
 }
 
+/* ============================================================
+ *  PageView 文字字号倍率：通过 CSS 变量驱动 zoom
+ *  - 给页面渲染的标题 / 副标题 / 正文元素加 data-pv-text="title|subtitle|caption"
+ *  - 倍率由 PageView 根元素的 --pv-zoom-title / --pv-zoom-subtitle / --pv-zoom-caption 提供
+ *  - zoom 会让元素的 layout box 等比缩放，标题变大时下方 paragraph 自动让位
+ *  - 仅作用于"本页"对应字段；OverlayText 用自己的 fontSize 不受影响
+ * ============================================================ */
+[data-pv-text='title'] {
+  zoom: var(--pv-zoom-title, 1);
+}
+[data-pv-text='subtitle'] {
+  zoom: var(--pv-zoom-subtitle, 1);
+}
+[data-pv-text='caption'] {
+  zoom: var(--pv-zoom-caption, 1);
+}

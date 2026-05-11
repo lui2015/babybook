@@ -867,6 +867,14 @@ export function BookEditorPage() {
                 totalPages={total}
                 onPagePatch={patchCurrentPage}
                 onBookPatch={(p) => updateBook(p)}
+                selectedOverlayId={selectedOverlayId}
+                onSelectOverlay={(id) => {
+                  setSelectedOverlayId(id);
+                  if (id) setSelectedPhotoId(null);
+                }}
+                onAddOverlay={addOverlay}
+                onPatchOverlay={patchOverlay}
+                onRemoveOverlay={removeOverlay}
               />
             )}
             {tab === 'layout' && (
@@ -1042,6 +1050,11 @@ function TextTab({
   totalPages,
   onPagePatch,
   onBookPatch,
+  selectedOverlayId,
+  onSelectOverlay,
+  onAddOverlay,
+  onPatchOverlay,
+  onRemoveOverlay,
 }: {
   page: BookPage;
   template: Template;
@@ -1051,7 +1064,19 @@ function TextTab({
   totalPages: number;
   onPagePatch: (patch: Partial<BookPage>) => void;
   onBookPatch: (patch: Partial<Book>) => void;
+  /** 自由文字块（OverlayText）管理：与「排版」Tab 的叠层面板共享同一套数据。 */
+  selectedOverlayId: string | null;
+  onSelectOverlay: (id: string | null) => void;
+  onAddOverlay: (kind: 'text' | 'photo') => void;
+  onPatchOverlay: (id: string, patch: Partial<Overlay>) => void;
+  onRemoveOverlay: (id: string) => void;
 }) {
+  // 仅展示文字类叠层（画框类在排版 Tab 管理）
+  const textOverlays = (page.overlays ?? []).filter((o): o is OverlayText => o.kind === 'text');
+  const selectedTextOverlay =
+    selectedOverlayId != null
+      ? textOverlays.find((o) => o.id === selectedOverlayId) ?? null
+      : null;
   const showTitle =
     page.layout === 'cover' || page.layout === 'text' || page.layout === 'ending';
   const showSubtitle = page.layout === 'cover';
@@ -1090,6 +1115,11 @@ function TextTab({
               value={effFont.title}
               onChange={(v) => setFont({ title: v })}
             />
+            <ScaleSlider
+              label="字号"
+              value={page.titleScale ?? 1}
+              onChange={(v) => onPagePatch({ titleScale: v })}
+            />
           </Field>
         )}
         {showSubtitle && (
@@ -1101,6 +1131,11 @@ function TextTab({
               onChange={(e) => onPagePatch({ subtitle: e.target.value })}
               placeholder={template.defaultSubtitle}
               maxLength={60}
+            />
+            <ScaleSlider
+              label="字号"
+              value={page.subtitleScale ?? 1}
+              onChange={(v) => onPagePatch({ subtitleScale: v })}
             />
           </Field>
         )}
@@ -1122,6 +1157,11 @@ function TextTab({
               role="body"
               value={effFont.body}
               onChange={(v) => setFont({ body: v })}
+            />
+            <ScaleSlider
+              label="字号"
+              value={page.captionScale ?? 1}
+              onChange={(v) => onPagePatch({ captionScale: v })}
             />
           </Field>
         )}
@@ -1165,6 +1205,101 @@ function TextTab({
           />
         </Field>
       </Section>
+
+      {/* 自由文字块：在版式骨架之上添加可拖拽的文字（与「排版」Tab 的叠层共享同一份数据） */}
+      <Section title="自由文字块" hint="在画面上自由摆放的文字，可拖动 / 缩放 / 旋转">
+        <div className="space-y-3">
+          <button
+            onClick={() => onAddOverlay('text')}
+            className="w-full py-1.5 rounded-md bg-rose/5 text-rose text-[12px] font-medium border border-dashed border-rose/40 hover:bg-rose/10 transition"
+          >
+            ＋ 添加文字块
+          </button>
+
+          {textOverlays.length === 0 ? (
+            <div className="text-[11px] text-neutral-400 text-center py-4 rounded-lg border border-dashed border-neutral-200 bg-neutral-50">
+              本页还没有自由文字块 · 点上方按钮添加，添加后可在预览里直接拖动 / 缩放 / 旋转
+            </div>
+          ) : (
+            <div className="rounded-lg border border-neutral-200 divide-y divide-neutral-100 overflow-hidden">
+              {textOverlays.map((ov) => {
+                const active = ov.id === selectedOverlayId;
+                return (
+                  <div
+                    key={ov.id}
+                    className={`flex items-center gap-2 px-2 py-1.5 text-[11px] cursor-pointer ${
+                      active ? 'bg-rose/5' : 'bg-white hover:bg-neutral-50'
+                    }`}
+                    onClick={() => onSelectOverlay(ov.id)}
+                  >
+                    <span
+                      className={`inline-block w-1.5 h-1.5 rounded-full ${active ? 'bg-rose' : 'bg-neutral-300'}`}
+                    />
+                    <span className={`flex-1 truncate ${active ? 'text-rose font-medium' : 'text-neutral-700'}`}>
+                      文字 · {ov.text || '(空)'}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm('删除该文字块？')) onRemoveOverlay(ov.id);
+                      }}
+                      className="text-neutral-400 hover:text-rose-600 px-1"
+                      title="删除"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedTextOverlay && (
+            <div className="rounded-lg border border-rose/30 bg-rose/5 p-2.5 space-y-2.5">
+              <div className="text-[11px] text-rose font-medium">
+                编辑选中文字 · 在预览中可直接拖动 / 缩放 / 旋转
+              </div>
+              <OverlayTextEditor
+                overlay={selectedTextOverlay}
+                onPatch={(patch) => onPatchOverlay(selectedTextOverlay.id, patch)}
+              />
+              {/* 旋转 */}
+              <div className="flex items-center gap-2 pt-1 border-t border-rose/20">
+                <label className="text-[11px] text-neutral-600">旋转</label>
+                <input
+                  type="range"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={selectedTextOverlay.rotation ?? 0}
+                  onChange={(e) =>
+                    onPatchOverlay(selectedTextOverlay.id, { rotation: Number(e.target.value) })
+                  }
+                  className="flex-1"
+                />
+                <span className="text-[11px] text-neutral-500 tabular-nums w-9 text-right">
+                  {Math.round(selectedTextOverlay.rotation ?? 0)}°
+                </span>
+                <button
+                  onClick={() => onPatchOverlay(selectedTextOverlay.id, { rotation: 0 })}
+                  className="text-[11px] text-neutral-500 hover:text-rose px-1"
+                  title="重置旋转"
+                >
+                  ↺
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  if (confirm('删除该文字块？')) onRemoveOverlay(selectedTextOverlay.id);
+                }}
+                className="w-full py-1 rounded-md bg-white text-rose text-[11px] border border-rose/30 hover:bg-rose/10"
+              >
+                删除该文字块
+              </button>
+            </div>
+          )}
+        </div>
+      </Section>
     </div>
   );
 }
@@ -1206,6 +1341,51 @@ function FontPickerRow({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 紧凑字号倍率滑块：用于"文字"Tab 中标题/副标题/正文字段下方，
+ * 控制本页该字段的 zoom 倍率。范围 0.6×~1.8×，步长 0.05。
+ */
+function ScaleSlider({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const v = Math.max(0.6, Math.min(1.8, Number.isFinite(value) ? value : 1));
+  const isDefault = Math.abs(v - 1) < 0.001;
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <label className="text-[11px] text-neutral-500 shrink-0">{label}</label>
+      <input
+        type="range"
+        min={0.6}
+        max={1.8}
+        step={0.05}
+        value={v}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1 accent-rose"
+      />
+      <span className="text-[11px] text-neutral-500 tabular-nums w-10 text-right">
+        {v.toFixed(2)}×
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(1)}
+        disabled={isDefault}
+        className={`text-[11px] px-1 transition ${
+          isDefault ? 'text-neutral-300 cursor-default' : 'text-neutral-500 hover:text-rose'
+        }`}
+        title="重置为默认字号"
+      >
+        ↺
+      </button>
     </div>
   );
 }

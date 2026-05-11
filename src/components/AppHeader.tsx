@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { SITE_THEMES, useSiteTheme, type SiteThemeId } from '../siteTheme';
 import { useAuth } from '../AuthContext';
+import { AccountDialog } from './AccountDialog';
 
 export function AppHeader() {
   const { pathname } = useLocation();
@@ -182,15 +183,17 @@ function ThemeSwitcher() {
 }
 
 /**
- * 用户菜单（匿名云端账户方案）
- * - 应用走匿名登录：每个浏览器自动获得一份持久化云端身份
- * - Header 这里展示一个简洁的"云端账户"徽标 + 下拉，
- *   提供"我的画册"快捷跳转 与 "重置账户"（换一个新匿名 uid）
+ * 用户菜单（匿名 + 正式账号 双形态）
+ * - 匿名：展示"云端账户 #xxxx"，菜单里有【升级为正式账号】【登录已有账号】【重置账户】
+ * - 正式：展示用户名/昵称，菜单里有【我的画册】【退出登录】
  */
 function UserMenu() {
-  const { user, loading, resetAccount } = useAuth();
+  const { user, loading, resetAccount, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<'upgrade' | 'signin' | null>(
+    null,
+  );
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -222,7 +225,9 @@ function UserMenu() {
   }
 
   const displayName = user.displayName;
-  const initial = displayName.replace(/[^A-Za-z0-9#]/g, '').slice(0, 1) || '☁';
+  const initial =
+    (user.username?.[0] || displayName).replace(/[^A-Za-z0-9#\u4e00-\u9fa5]/g, '').slice(0, 1) ||
+    (user.isAnonymous ? '☁' : '👤');
 
   async function onReset() {
     setOpen(false);
@@ -235,84 +240,151 @@ function UserMenu() {
     await resetAccount();
   }
 
+  async function onSignOut() {
+    setOpen(false);
+    const ok = window.confirm(
+      '退出登录后，当前浏览器会回到匿名状态，看不到这个账号下的画册。\n下次仍可用同一用户名/密码登录回来。\n\n确定退出？',
+    );
+    if (!ok) return;
+    await signOut();
+  }
+
+  function openDialog(mode: 'upgrade' | 'signin') {
+    setOpen(false);
+    setDialogMode(mode);
+  }
+
   return (
-    <div className="relative ml-1" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-full bb-pill text-xs"
-        title={displayName}
-      >
-        <span
-          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold"
-          style={{ background: 'var(--bb-btn-bg)' }}
+    <>
+      <div className="relative ml-1" ref={ref}>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-full bb-pill text-xs"
+          title={displayName}
         >
-          {initial}
-        </span>
-        <span className="hidden sm:inline max-w-[8rem] truncate">
-          {displayName}
-        </span>
-        <span className="opacity-60">▾</span>
-      </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-60 rounded-2xl p-2 bb-card z-40">
-          <div
-            className="px-3 pt-2 pb-1 text-[10px] tracking-[0.25em]"
-            style={{ color: 'var(--bb-fg-muted)' }}
+          <span
+            className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold"
+            style={{ background: 'var(--bb-btn-bg)' }}
           >
-            云端账户
-          </div>
-          <div
-            className="px-3 pb-1 text-sm truncate"
-            style={{ color: 'var(--bb-fg)' }}
-          >
+            {initial}
+          </span>
+          <span className="hidden sm:inline max-w-[8rem] truncate">
             {displayName}
+          </span>
+          <span className="opacity-60">▾</span>
+        </button>
+        {open && (
+          <div className="absolute right-0 mt-2 w-64 rounded-2xl p-2 bb-card z-40">
+            <div
+              className="px-3 pt-2 pb-1 text-[10px] tracking-[0.25em]"
+              style={{ color: 'var(--bb-fg-muted)' }}
+            >
+              {user.isAnonymous ? '云端账户（匿名）' : '当前账号'}
+            </div>
+            <div
+              className="px-3 pb-1 text-sm truncate"
+              style={{ color: 'var(--bb-fg)' }}
+            >
+              {displayName}
+            </div>
+            <div
+              className="px-3 pb-2 text-[11px] leading-relaxed"
+              style={{ color: 'var(--bb-fg-muted)' }}
+            >
+              {user.isAnonymous ? (
+                <>
+                  画册自动保存在云端，
+                  <br />
+                  下次用同一浏览器打开仍可见。
+                  <br />
+                  <span style={{ color: 'var(--bb-primary)' }}>
+                    升级为正式账号后，可在其他设备登录。
+                  </span>
+                </>
+              ) : (
+                <>已登录，画册在所有设备同步。</>
+              )}
+            </div>
+            <div
+              className="my-1 h-px"
+              style={{ background: 'var(--bb-border)' }}
+            />
+
+            <MenuButton
+              onClick={() => {
+                setOpen(false);
+                navigate('/my');
+              }}
+            >
+              我的画册
+            </MenuButton>
+
+            {user.isAnonymous ? (
+              <>
+                <MenuButton
+                  onClick={() => openDialog('upgrade')}
+                  highlight
+                >
+                  升级为正式账号
+                </MenuButton>
+                <MenuButton onClick={() => openDialog('signin')}>
+                  登录已有账号
+                </MenuButton>
+                <MenuButton onClick={onReset} danger>
+                  重置账户
+                </MenuButton>
+              </>
+            ) : (
+              <MenuButton onClick={onSignOut} danger>
+                退出登录
+              </MenuButton>
+            )}
           </div>
-          <div
-            className="px-3 pb-2 text-[11px] leading-relaxed"
-            style={{ color: 'var(--bb-fg-muted)' }}
-          >
-            画册自动保存在云端，
-            <br />
-            下次用同一浏览器打开仍可看到。
-          </div>
-          <div
-            className="my-1 h-px"
-            style={{ background: 'var(--bb-border)' }}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              navigate('/my');
-            }}
-            className="w-full text-left px-3 py-2 rounded-xl text-sm"
-            style={{ color: 'var(--bb-fg)' }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--bb-pill-bg)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            我的画册
-          </button>
-          <button
-            type="button"
-            onClick={onReset}
-            className="w-full text-left px-3 py-2 rounded-xl text-sm"
-            style={{ color: '#dc2626' }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            重置账户
-          </button>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+      <AccountDialog
+        initialMode={dialogMode}
+        onClose={() => setDialogMode(null)}
+      />
+    </>
+  );
+}
+
+function MenuButton({
+  children,
+  onClick,
+  danger,
+  highlight,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  highlight?: boolean;
+}) {
+  const color = danger
+    ? '#dc2626'
+    : highlight
+      ? 'var(--bb-primary, var(--bb-fg))'
+      : 'var(--bb-fg)';
+  const hoverBg = danger ? 'rgba(239,68,68,0.08)' : 'var(--bb-pill-bg)';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left px-3 py-2 rounded-xl text-sm transition"
+      style={{
+        color,
+        fontWeight: highlight ? 600 : undefined,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = hoverBg;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      {children}
+    </button>
   );
 }
