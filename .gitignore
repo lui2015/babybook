@@ -9,3 +9,6 @@ dist-ssr
 
 # TypeScript 增量编译产物
 *.tsbuildinfo
+
+# CodeBuddy 自动下载的规则集（不入库）
+.codebuddy/rules/

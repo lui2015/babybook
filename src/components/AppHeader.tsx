@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { SITE_THEMES, useSiteTheme, type SiteThemeId } from '../siteTheme';
+import { useAuth } from '../AuthContext';
 
 export function AppHeader() {
   const { pathname } = useLocation();
@@ -45,6 +46,7 @@ export function AppHeader() {
           <NavItem to="/create">创建画册</NavItem>
           <NavItem to="/my">我的画册</NavItem>
           <ThemeSwitcher />
+          <UserMenu />
         </nav>
       </div>
     </header>
@@ -173,6 +175,142 @@ function ThemeSwitcher() {
               </button>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 用户菜单（匿名云端账户方案）
+ * - 应用走匿名登录：每个浏览器自动获得一份持久化云端身份
+ * - Header 这里展示一个简洁的"云端账户"徽标 + 下拉，
+ *   提供"我的画册"快捷跳转 与 "重置账户"（换一个新匿名 uid）
+ */
+function UserMenu() {
+  const { user, loading, resetAccount } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // 加载中：占位避免抖动
+  if (loading || !user) {
+    return (
+      <span
+        className="ml-1 px-3 py-1.5 rounded-full text-xs opacity-50"
+        style={{ color: 'var(--bb-fg-muted)' }}
+      >
+        ···
+      </span>
+    );
+  }
+
+  const displayName = user.displayName;
+  const initial = displayName.replace(/[^A-Za-z0-9#]/g, '').slice(0, 1) || '☁';
+
+  async function onReset() {
+    setOpen(false);
+    const ok = window.confirm(
+      '重置云端账户后，当前浏览器会换一个全新的云端身份，' +
+        '之前保存的画册在这个浏览器里将不再可见（云端数据不会被立即删除）。\n\n' +
+        '确定继续？',
+    );
+    if (!ok) return;
+    await resetAccount();
+  }
+
+  return (
+    <div className="relative ml-1" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-2 py-1 rounded-full bb-pill text-xs"
+        title={displayName}
+      >
+        <span
+          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-semibold"
+          style={{ background: 'var(--bb-btn-bg)' }}
+        >
+          {initial}
+        </span>
+        <span className="hidden sm:inline max-w-[8rem] truncate">
+          {displayName}
+        </span>
+        <span className="opacity-60">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-60 rounded-2xl p-2 bb-card z-40">
+          <div
+            className="px-3 pt-2 pb-1 text-[10px] tracking-[0.25em]"
+            style={{ color: 'var(--bb-fg-muted)' }}
+          >
+            云端账户
+          </div>
+          <div
+            className="px-3 pb-1 text-sm truncate"
+            style={{ color: 'var(--bb-fg)' }}
+          >
+            {displayName}
+          </div>
+          <div
+            className="px-3 pb-2 text-[11px] leading-relaxed"
+            style={{ color: 'var(--bb-fg-muted)' }}
+          >
+            画册自动保存在云端，
+            <br />
+            下次用同一浏览器打开仍可看到。
+          </div>
+          <div
+            className="my-1 h-px"
+            style={{ background: 'var(--bb-border)' }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              navigate('/my');
+            }}
+            className="w-full text-left px-3 py-2 rounded-xl text-sm"
+            style={{ color: 'var(--bb-fg)' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bb-pill-bg)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            我的画册
+          </button>
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full text-left px-3 py-2 rounded-xl text-sm"
+            style={{ color: '#dc2626' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            重置账户
+          </button>
         </div>
       )}
     </div>

@@ -3,21 +3,32 @@ import { Link } from 'react-router-dom';
 import { listBooks, deleteBook } from '../storage';
 import { useTemplateRegistry } from '../TemplateRegistry';
 import { PageView } from '../components/PageView';
+import { useAuth } from '../AuthContext';
 import type { Book } from '../types';
 
 export function MyBooksPage() {
+  const { isAuthenticated, user, loading: authLoading } = useAuth();
   const [books, setBooks] = useState<Book[] | null>(null);
 
   async function refresh() {
-    const list = await listBooks();
-    setBooks(list);
+    setBooks(null);
+    try {
+      const list = await listBooks();
+      setBooks(list);
+    } catch (err) {
+      console.warn('[my] load books failed', err);
+      setBooks([]);
+    }
   }
 
+  // 登录态恢复后再加载，避免在登录态判定前抢跑
   useEffect(() => {
+    if (authLoading) return;
     refresh();
-  }, []);
+    // 登录/登出切换都重新拉一次（云端 vs 本地）
+  }, [authLoading, isAuthenticated]);
 
-  if (books === null) {
+  if (authLoading || books === null) {
     return (
       <div className="py-20 text-center" style={{ color: 'var(--bb-fg-muted)' }}>
         加载中…
@@ -27,7 +38,7 @@ export function MyBooksPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1
           className="font-display text-3xl font-bold"
           style={{ color: 'var(--bb-fg)' }}
@@ -40,6 +51,27 @@ export function MyBooksPage() {
         >
           + 新建画册
         </Link>
+      </div>
+
+      {/* 数据来源横幅：清晰告诉用户画册存在哪 */}
+      <div
+        className="mb-6 rounded-2xl px-4 py-3 text-sm flex items-center justify-between gap-3 flex-wrap"
+        style={{
+          background: 'var(--bb-pill-bg)',
+          color: 'var(--bb-fg-muted)',
+          border: '1px solid var(--bb-border)',
+        }}
+      >
+        <span>
+          {isAuthenticated ? (
+            <>
+              ☁️ <b style={{ color: 'var(--bb-fg)' }}>{user?.displayName}</b>
+              ，画册自动保存在云端，下次用同一浏览器打开仍可访问。
+            </>
+          ) : (
+            <>💾 云端账户初始化中，画册暂存本机…</>
+          )}
+        </span>
       </div>
 
       {books.length === 0 ? (

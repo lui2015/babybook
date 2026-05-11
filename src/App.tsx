@@ -10,30 +10,33 @@ import { TemplateEditorPage } from './pages/TemplateEditorPage';
 import { DraftProvider } from './DraftContext';
 import { TemplateRegistryProvider } from './TemplateRegistry';
 import { SiteThemeProvider } from './siteTheme';
+import { AuthProvider } from './AuthContext';
 
 export default function App() {
   return (
     <SiteThemeProvider>
-      <TemplateRegistryProvider>
-        <DraftProvider>
-          <div className="min-h-screen">
-          <AppHeader />
-          <main>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/templates" element={<TemplatesPage />} />
-              <Route path="/templates/new" element={<TemplateEditorPage />} />
-              <Route path="/templates/edit/:id" element={<TemplateEditorPage />} />
-              <Route path="/create" element={<CreatePage />} />
-              <Route path="/my" element={<MyBooksPage />} />
-              <Route path="/book/:id" element={<BookDetailPage />} />
-              <Route path="/book/:id/edit" element={<BookEditorPage />} />
-              <Route path="*" element={<HomePage />} />
-            </Routes>
-          </main>
-        </div>
-        </DraftProvider>
-      </TemplateRegistryProvider>
+      <AuthProvider>
+        <TemplateRegistryProvider>
+          <DraftProvider>
+            <div className="min-h-screen">
+              <AppHeader />
+              <main>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/templates" element={<TemplatesPage />} />
+                  <Route path="/templates/new" element={<TemplateEditorPage />} />
+                  <Route path="/templates/edit/:id" element={<TemplateEditorPage />} />
+                  <Route path="/create" element={<CreatePage />} />
+                  <Route path="/my" element={<MyBooksPage />} />
+                  <Route path="/book/:id" element={<BookDetailPage />} />
+                  <Route path="/book/:id/edit" element={<BookEditorPage />} />
+                  <Route path="*" element={<HomePage />} />
+                </Routes>
+              </main>
+            </div>
+          </DraftProvider>
+        </TemplateRegistryProvider>
+      </AuthProvider>
     </SiteThemeProvider>
   );
 }
