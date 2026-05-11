@@ -3,8 +3,14 @@
 /** 用户上传的照片 */
 export interface Photo {
   id: string;
-  /** DataURL 或 ObjectURL，便于直接渲染 */
+  /** DataURL / ObjectURL / 云存储临时 URL（已登录从云端 hydrate 后），便于直接渲染 */
   src: string;
+  /**
+   * 仅当 src 是从云存储 fileID 解析出的临时 URL 时存在；
+   * 用于在写回云端前还原回 cloud:// 协议的 fileID（避免把临时 URL 当 src 持久化）。
+   * 未登录/纯本地画册不会有此字段。
+   */
+  srcCloud?: string;
   width: number;
   height: number;
   /** 宽高比，便于排版决策 */
@@ -140,6 +146,61 @@ export interface BookPage {
    * undefined 表示使用默认居中。
    */
   photoFocus?: (PhotoFocus | undefined)[];
+  /**
+   * 自由叠层元素：在版式骨架之上叠加的自定义画框 / 文字块，
+   * 用户可自由拖动、缩放、旋转、删除。与版式骨架完全正交（不会改 photoIds）。
+   * 渲染顺序按数组顺序，越后越靠上。
+   */
+  overlays?: Overlay[];
+}
+
+/** 自由叠层：照片画框 / 自定义文字 */
+export type Overlay = OverlayPhoto | OverlayText;
+
+/** 所有叠层共用的几何信息（百分比，相对于"页面容器"宽高） */
+export interface OverlayBase {
+  id: string;
+  /** 左上角 X，单位 % (0~100) */
+  x: number;
+  /** 左上角 Y，单位 % (0~100) */
+  y: number;
+  /** 宽度，单位 %（相对于页面宽度） */
+  w: number;
+  /** 高度，单位 %（相对于页面高度） */
+  h: number;
+  /** 旋转角度（顺时针为正，单位 deg），未设置时为 0 */
+  rotation?: number;
+}
+
+export interface OverlayPhoto extends OverlayBase {
+  kind: 'photo';
+  /** 引用 book.photos 中的照片 id */
+  photoId: string;
+  /** 画框形状；不填默认 rect */
+  shape?: PhotoShape;
+  /** 边框颜色；不填则用模板默认（通常 white / paper） */
+  borderColor?: string | null;
+  /** 边框宽度（px），不填用 4px */
+  borderWidth?: number;
+}
+
+export interface OverlayText extends OverlayBase {
+  kind: 'text';
+  text: string;
+  /** 字号（单位 px，按"页面 720px 设计宽度"基准缩放） */
+  fontSize?: number;
+  /** 字色（hex） */
+  color?: string;
+  /** 字体族（CSS font-family，与现有 FONT_OPTIONS 兼容） */
+  fontFamily?: string;
+  /** 加粗 */
+  bold?: boolean;
+  /** 斜体 */
+  italic?: boolean;
+  /** 文本对齐 */
+  align?: 'left' | 'center' | 'right';
+  /** 背景色（含 'transparent'） */
+  background?: string;
 }
 
 /** 照片在相框内的对焦位置（object-position 百分比） */

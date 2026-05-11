@@ -1,6 +1,6 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { createContext, memo, useContext, useEffect, useRef, useState } from 'react';
-import type { BookPage, Photo, PhotoFocus, PhotoShape, Template, TemplateStyle } from '../types';
+import type { BookPage, Overlay, OverlayPhoto, OverlayText, Photo, PhotoFocus, PhotoShape, Template, TemplateStyle } from '../types';
 import { defaultVariantId } from '../layoutVariants';
 
 /**
@@ -270,6 +270,17 @@ interface Props {
       zoom: number;
     },
   ) => void;
+  /**
+   * 自由叠层数据。优先取此 prop；不传则使用 page.overlays。
+   * 之所以单独抽 prop，是因为编辑器经常在「未提交到 page」时实时预览拖拽态。
+   */
+  overlays?: Overlay[];
+  /** 当前选中的叠层 id（仅编辑模式下生效） */
+  selectedOverlayId?: string | null;
+  /** 选中叠层（点击叠层 → id；点击空白 → null）。传该回调即视为"叠层可编辑" */
+  onSelectOverlay?: (id: string | null) => void;
+  /** 叠层数组发生变化（拖动/缩放/旋转结束）时回调 */
+  onOverlaysChange?: (next: Overlay[]) => void;
 }
 
 /**
@@ -277,7 +288,7 @@ interface Props {
  * 按 template.style 走完全不同的视觉骨架：
  *   watercolor / cartoon / minimal / vintage / festival-cn / festival-xmas
  */
-function PageViewInner({ page, photos, template, babyName, dateRange, width, height, onSelectPhoto, selectedPhotoId, photoFrameColor, onAdjustFocus }: Props) {
+function PageViewInner({ page, photos, template, babyName, dateRange, width, height, onSelectPhoto, selectedPhotoId, photoFrameColor, onAdjustFocus, overlays: overlaysProp, selectedOverlayId, onSelectOverlay, onOverlaysChange }: Props) {
   const photoMap = new Map(photos.map((p) => [p.id, p]));
   // src → photoId 反查表：点击 <img> 时靠 src 反查 photoId（浏览器 img.src 会返回绝对 URL，
   // 但 dataURL/blob/相对路径我们都完整保存在 Photo.src 里，所以用 endsWith 做兜底匹配）。
@@ -365,6 +376,11 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
   const handleImgClick = editable
     ? (e: ReactMouseEvent<HTMLDivElement>) => {
         const target = e.target as HTMLElement;
+        // 若点击发生在自由叠层（OverlayLayer）内部，则交给 OverlayLayer 自己处理，
+        // 不再误命中 overlay 内部 PhotoFrame 渲染出的 <img data-photo-id>
+        if (target.closest('[data-overlay-id]')) {
+          return;
+        }
         const photoEl = target.closest('[data-photo-id]') as HTMLElement | null;
         if (!photoEl) {
           // 点击的是空白区域：取消选中
@@ -480,6 +496,19 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
       </PhotoShapeContext.Provider>
       </PhotoFrameColorContext.Provider>
 
+      {/* 自由叠层（画框 / 文字）—— 永远渲染在版式骨架之上 */}
+      <OverlayLayer
+        overlays={overlaysProp ?? page.overlays ?? []}
+        photos={photos}
+        template={template}
+        photoFrameColor={photoFrameColor ?? null}
+        editable={!!onSelectOverlay}
+        selectedOverlayId={selectedOverlayId ?? null}
+        onSelectOverlay={onSelectOverlay}
+        onOverlaysChange={onOverlaysChange}
+        containerRef={rootRef}
+      />
+
       {resolvedLayout === 'text' && <TextLayout page={fallbackPage} template={template} />}
 
       {resolvedLayout === 'ending' && <EndingLayout page={page} template={template} babyName={babyName} />}
@@ -505,7 +534,11 @@ export const PageView = memo(PageViewInner, (prev, next) => {
     prev.onSelectPhoto === next.onSelectPhoto &&
     prev.selectedPhotoId === next.selectedPhotoId &&
     prev.photoFrameColor === next.photoFrameColor &&
-    prev.onAdjustFocus === next.onAdjustFocus
+    prev.onAdjustFocus === next.onAdjustFocus &&
+    prev.overlays === next.overlays &&
+    prev.selectedOverlayId === next.selectedOverlayId &&
+    prev.onSelectOverlay === next.onSelectOverlay &&
+    prev.onOverlaysChange === next.onOverlaysChange
   );
 });
 
@@ -3945,4 +3978,462 @@ function Grid6Layout({
       {caption && <StyledCaption caption={caption} template={template} size="sm" />}
     </div>
   );
+}
+
+/* ============================================================
+ *  OverlayLayer —— 自由叠层（画框 / 文字）
+ *
+ *  设计要点：
+ *  - 几何全部用百分比（x/y/w/h），与页面渲染分辨率解耦：编辑器/预览/PDF 导出（720x960）通用。
+ *  - 展示态（editable=false）：只读渲染，pointer-events: none，不影响下层操作（点击下层照片选中、调焦点等不受影响）。
+ *  - 编辑态：每个 overlay 是一个独立交互单元，支持选中、拖动整体、8 个方向缩放手柄、1 个旋转手柄。
+ *  - 拖动/缩放/旋转期间用 React state 维持"实时几何"，pointerup 时一次性回写到 onOverlaysChange。
+ *  - 与 PhotoFocus 互斥：上层 BookEditor 通过 selectedPhotoId/selectedOverlayId 二选一控制。
+ * ============================================================ */
+
+interface OverlayLayerProps {
+  overlays: Overlay[];
+  photos: Photo[];
+  template: Template;
+  photoFrameColor: string | null;
+  editable: boolean;
+  selectedOverlayId: string | null;
+  onSelectOverlay?: (id: string | null) => void;
+  onOverlaysChange?: (next: Overlay[]) => void;
+  containerRef: MutableRefObject<HTMLDivElement | null>;
+}
+
+type DragMode =
+  | { kind: 'move'; id: string; startX: number; startY: number; oxPct: number; oyPct: number }
+  | {
+      kind: 'resize';
+      id: string;
+      handle: ResizeHandle;
+      startX: number;
+      startY: number;
+      ox: number;
+      oy: number;
+      ow: number;
+      oh: number;
+    }
+  | {
+      kind: 'rotate';
+      id: string;
+      cx: number;
+      cy: number;
+      startAngle: number;
+      startRot: number;
+    }
+  | null;
+
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+function OverlayLayer({
+  overlays,
+  photos,
+  template,
+  photoFrameColor,
+  editable,
+  selectedOverlayId,
+  onSelectOverlay,
+  onOverlaysChange,
+  containerRef,
+}: OverlayLayerProps) {
+  const photoMap = new Map(photos.map((p) => [p.id, p]));
+  // drag 用 ref —— pointerdown 同步生效，且不会被 React re-render 异步切片打断
+  const dragRef = useRef<DragMode>(null);
+  // livePatch 用 state —— 驱动实时 UI 重绘
+  const [livePatch, setLivePatch] = useState<Partial<OverlayBaseSnapshot> & { id?: string }>({});
+  // overlays / onOverlaysChange 通过 ref 拿最新值（pointermove/up 闭包不会过期）
+  const overlaysRef = useRef(overlays);
+  overlaysRef.current = overlays;
+  const onOverlaysChangeRef = useRef(onOverlaysChange);
+  onOverlaysChangeRef.current = onOverlaysChange;
+  const livePatchRef = useRef(livePatch);
+  livePatchRef.current = livePatch;
+
+  // 把外部传入的 overlays 与 livePatch 合并出实际渲染列表
+  const displayOverlays: Overlay[] = livePatch.id
+    ? overlays.map((o) =>
+        o.id === livePatch.id
+          ? ({
+              ...o,
+              x: livePatch.x ?? o.x,
+              y: livePatch.y ?? o.y,
+              w: livePatch.w ?? o.w,
+              h: livePatch.h ?? o.h,
+              rotation: livePatch.rotation ?? o.rotation,
+            } as Overlay)
+          : o,
+      )
+    : overlays;
+
+  // 公共：把屏幕像素位移 → 百分比（基于页面容器尺寸）
+  function pageSizePx(): { w: number; h: number } | null {
+    const root = containerRef.current;
+    if (!root) return null;
+    const rect = root.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return { w: rect.width, h: rect.height };
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const sz = pageSizePx();
+    if (!sz) return;
+    if (drag.kind === 'move') {
+      const dxPct = ((e.clientX - drag.startX) / sz.w) * 100;
+      const dyPct = ((e.clientY - drag.startY) / sz.h) * 100;
+      setLivePatch({ id: drag.id, x: drag.oxPct + dxPct, y: drag.oyPct + dyPct });
+    } else if (drag.kind === 'resize') {
+      const dxPct = ((e.clientX - drag.startX) / sz.w) * 100;
+      const dyPct = ((e.clientY - drag.startY) / sz.h) * 100;
+      let nx = drag.ox;
+      let ny = drag.oy;
+      let nw = drag.ow;
+      let nh = drag.oh;
+      // 四角与四边各自影响 x/y/w/h
+      if (drag.handle.includes('e')) nw = Math.max(4, drag.ow + dxPct);
+      if (drag.handle.includes('s')) nh = Math.max(4, drag.oh + dyPct);
+      if (drag.handle.includes('w')) {
+        nw = Math.max(4, drag.ow - dxPct);
+        nx = drag.ox + (drag.ow - nw);
+      }
+      if (drag.handle.includes('n')) {
+        nh = Math.max(4, drag.oh - dyPct);
+        ny = drag.oy + (drag.oh - nh);
+      }
+      setLivePatch({ id: drag.id, x: nx, y: ny, w: nw, h: nh });
+    } else if (drag.kind === 'rotate') {
+      const ang = (Math.atan2(e.clientY - drag.cy, e.clientX - drag.cx) * 180) / Math.PI;
+      const delta = ang - drag.startAngle;
+      let next = drag.startRot + delta;
+      // 规范到 -180~180
+      while (next > 180) next -= 360;
+      while (next < -180) next += 360;
+      setLivePatch({ id: drag.id, rotation: next });
+    }
+  }
+
+  function detachListeners() {
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', handlePointerUp);
+    window.removeEventListener('pointercancel', handlePointerUp);
+  }
+
+  function handlePointerUp() {
+    const drag = dragRef.current;
+    detachListeners();
+    if (!drag) return;
+    const id = drag.id;
+    const patch = livePatchRef.current;
+    dragRef.current = null;
+    setLivePatch({});
+    if (!patch.id || !onOverlaysChangeRef.current) return;
+    const list = overlaysRef.current;
+    const next = list.map((o) =>
+      o.id === id
+        ? ({
+            ...o,
+            x: patch.x ?? o.x,
+            y: patch.y ?? o.y,
+            w: patch.w ?? o.w,
+            h: patch.h ?? o.h,
+            rotation: patch.rotation ?? o.rotation,
+          } as Overlay)
+        : o,
+    );
+    onOverlaysChangeRef.current(next);
+  }
+
+  function attachListeners() {
+    // 同步注册：pointerdown 之后立刻命中后续 pointermove —— 不依赖 React effect 时序
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  }
+
+  // 卸载时确保监听器清理（避免拖到一半组件被卸载导致泄漏）
+  useEffect(() => {
+    return () => detachListeners();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!displayOverlays.length && !editable) return null;
+
+  function startMove(e: ReactPointerEvent<HTMLDivElement>, ov: Overlay) {
+    if (!editable) return;
+    // 阻止冒泡到 PageView 的 onClick (handleImgClick) 把 selectedPhoto 清空
+    e.stopPropagation();
+    e.preventDefault();
+    onSelectOverlay?.(ov.id);
+    dragRef.current = {
+      kind: 'move',
+      id: ov.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      oxPct: ov.x,
+      oyPct: ov.y,
+    };
+    attachListeners();
+  }
+
+  function startResize(
+    e: ReactPointerEvent<HTMLDivElement>,
+    ov: Overlay,
+    handle: ResizeHandle,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = {
+      kind: 'resize',
+      id: ov.id,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      ox: ov.x,
+      oy: ov.y,
+      ow: ov.w,
+      oh: ov.h,
+    };
+    attachListeners();
+  }
+
+  function startRotate(e: ReactPointerEvent<HTMLDivElement>, ov: Overlay) {
+    e.stopPropagation();
+    e.preventDefault();
+    const root = containerRef.current;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    const cx = rect.left + (rect.width * (ov.x + ov.w / 2)) / 100;
+    const cy = rect.top + (rect.height * (ov.y + ov.h / 2)) / 100;
+    const startAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+    dragRef.current = {
+      kind: 'rotate',
+      id: ov.id,
+      cx,
+      cy,
+      startAngle,
+      startRot: ov.rotation ?? 0,
+    };
+    attachListeners();
+  }
+
+  return (
+    <div
+      className="absolute inset-0"
+      style={{
+        // 容器永远透传 —— 只让具体 overlay 子元素接收事件，避免遮挡下层照片点击
+        pointerEvents: 'none',
+        // 在版式骨架上方渲染
+        zIndex: 5,
+      }}
+    >
+      {displayOverlays.map((ov) => {
+        const selected = editable && ov.id === selectedOverlayId;
+        const baseStyle: CSSProperties = {
+          position: 'absolute',
+          left: `${ov.x}%`,
+          top: `${ov.y}%`,
+          width: `${ov.w}%`,
+          height: `${ov.h}%`,
+          transform: ov.rotation ? `rotate(${ov.rotation}deg)` : undefined,
+          transformOrigin: 'center center',
+          // 选中时淡淡的轮廓，便于看清拖拽边界
+          outline: selected ? '1.5px dashed rgba(99,102,241,0.85)' : undefined,
+          outlineOffset: selected ? '2px' : undefined,
+          touchAction: 'none',
+          // 编辑态下 overlay 主体显式可接收 pointer 事件（防止父级或全局规则误伤）
+          pointerEvents: editable ? 'auto' : 'none',
+          cursor: editable ? 'move' : 'default',
+          // 在版式骨架之上 —— 注意 OverlayLayer 已 zIndex:5，这里不再额外加层级
+          userSelect: 'none',
+        };
+        return (
+          <div
+            key={ov.id}
+            data-overlay-id={ov.id}
+            className={editable ? 'overlay-draggable' : undefined}
+            style={baseStyle}
+            onPointerDown={(e) => startMove(e, ov)}
+          >
+            {ov.kind === 'photo' ? (
+              <OverlayPhotoBody overlay={ov} photo={photoMap.get(ov.photoId)} template={template} photoFrameColor={photoFrameColor} />
+            ) : (
+              <OverlayTextBody overlay={ov} />
+            )}
+
+            {selected && (
+              <>
+                {/* 8 个缩放手柄 */}
+                {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as ResizeHandle[]).map((h) => (
+                  <div
+                    key={h}
+                    onPointerDown={(e) => startResize(e, ov, h)}
+                    style={{
+                      position: 'absolute',
+                      width: 10,
+                      height: 10,
+                      background: '#fff',
+                      border: '1.5px solid rgba(99,102,241,0.95)',
+                      borderRadius: 2,
+                      ...handlePos(h),
+                      cursor: handleCursor(h),
+                      touchAction: 'none',
+                      zIndex: 2,
+                    }}
+                  />
+                ))}
+                {/* 旋转手柄（顶部上方） */}
+                <div
+                  onPointerDown={(e) => startRotate(e, ov)}
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: -28,
+                    width: 14,
+                    height: 14,
+                    marginLeft: -7,
+                    background: '#fff',
+                    border: '1.5px solid rgba(99,102,241,0.95)',
+                    borderRadius: '50%',
+                    cursor: 'grab',
+                    touchAction: 'none',
+                    zIndex: 2,
+                  }}
+                  title="旋转"
+                />
+                {/* 旋转手柄到选框的连线 */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: -16,
+                    width: 1,
+                    height: 16,
+                    background: 'rgba(99,102,241,0.6)',
+                    zIndex: 1,
+                    pointerEvents: 'none',
+                  }}
+                />
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+interface OverlayBaseSnapshot {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation?: number;
+}
+
+/** 8 个缩放手柄的位置（绝对定位坐标） */
+function handlePos(h: ResizeHandle): CSSProperties {
+  const cx = '50%';
+  const cy = '50%';
+  const off = -5;
+  switch (h) {
+    case 'nw':
+      return { left: off, top: off };
+    case 'n':
+      return { left: cx, top: off, marginLeft: -5 };
+    case 'ne':
+      return { right: off, top: off };
+    case 'e':
+      return { right: off, top: cy, marginTop: -5 };
+    case 'se':
+      return { right: off, bottom: off };
+    case 's':
+      return { left: cx, bottom: off, marginLeft: -5 };
+    case 'sw':
+      return { left: off, bottom: off };
+    case 'w':
+      return { left: off, top: cy, marginTop: -5 };
+  }
+}
+
+function handleCursor(h: ResizeHandle): string {
+  switch (h) {
+    case 'n':
+    case 's':
+      return 'ns-resize';
+    case 'e':
+    case 'w':
+      return 'ew-resize';
+    case 'ne':
+    case 'sw':
+      return 'nesw-resize';
+    case 'nw':
+    case 'se':
+      return 'nwse-resize';
+  }
+}
+
+/** 单个图片叠层渲染（用现有 PhotoFrame 复用模板风格 + 形状） */
+function OverlayPhotoBody({
+  overlay,
+  photo,
+  template,
+  photoFrameColor,
+}: {
+  overlay: OverlayPhoto;
+  photo?: Photo;
+  template: Template;
+  photoFrameColor: string | null;
+}) {
+  if (!photo) {
+    // 引用的照片已被删除：渲染占位提示，避免静默丢失
+    return (
+      <div
+        className="w-full h-full flex items-center justify-center text-[10px] text-rose-500/80"
+        style={{ background: 'rgba(255,228,230,0.6)', border: '1px dashed #fb7185' }}
+      >
+        图片已删除
+      </div>
+    );
+  }
+  // 用一个临时的"形状/颜色"上下文，让 PhotoFrame 走叠层指定的形状
+  return (
+    <PhotoShapeContext.Provider value={() => overlay.shape ?? 'rect'}>
+      <PhotoFrameColorContext.Provider value={overlay.borderColor ?? photoFrameColor ?? null}>
+        <div className="w-full h-full" style={{ pointerEvents: 'none' }}>
+          <PhotoFrame photo={photo} template={template} className="w-full h-full" />
+        </div>
+      </PhotoFrameColorContext.Provider>
+    </PhotoShapeContext.Provider>
+  );
+}
+
+/** 单个文字叠层渲染（不使用 PhotoFrame；最简、可读、可导出） */
+function OverlayTextBody({ overlay }: { overlay: OverlayText }) {
+  const style: CSSProperties = {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent:
+      overlay.align === 'left' ? 'flex-start' : overlay.align === 'right' ? 'flex-end' : 'center',
+    textAlign: overlay.align ?? 'center',
+    color: overlay.color ?? '#222',
+    fontFamily: overlay.fontFamily,
+    fontSize: overlay.fontSize ? `${overlay.fontSize}px` : undefined,
+    fontWeight: overlay.bold ? 700 : 400,
+    fontStyle: overlay.italic ? 'italic' : undefined,
+    background: overlay.background && overlay.background !== 'transparent' ? overlay.background : undefined,
+    padding: overlay.background && overlay.background !== 'transparent' ? '4px 8px' : 0,
+    borderRadius: overlay.background && overlay.background !== 'transparent' ? 6 : 0,
+    lineHeight: 1.25,
+    wordBreak: 'break-word',
+    whiteSpace: 'pre-wrap',
+    pointerEvents: 'none',
+    userSelect: 'none',
+  };
+  return <div style={style}>{overlay.text || '文字'}</div>;
 }

@@ -220,6 +220,30 @@ body {
   backdrop-filter: blur(8px);
 }
 
+/* 表单输入框：感知站点主题，登录/注册等表单复用 */
+.bb-input {
+  background: var(--bb-surface);
+  color: var(--bb-fg);
+  border: 1px solid var(--bb-border);
+  border-radius: 0.625rem; /* rounded-lg + 一点点 */
+  padding: 0.625rem 0.875rem;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.bb-input::placeholder {
+  color: var(--bb-fg-muted);
+  opacity: 0.7;
+}
+.bb-input:focus {
+  border-color: var(--bb-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bb-primary) 18%, transparent);
+}
+.bb-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* 赛博朋克：主按钮加一道边缘霓虹光 */
 [data-site-theme='cyberpunk'] .bb-btn-primary {
   box-shadow:
@@ -381,6 +405,24 @@ body {
   cursor: grab !important;
 }
 .pv-editable [data-focus-draggable='true']:active {
+  cursor: grabbing !important;
+}
+
+/* ============================================================
+ *  自由叠层（OverlayLayer）：编辑态下让"画框边框"成为明显的拖动手柄
+ *  - 默认：透明 1.5px 内描边占位，避免 hover 时元素抖动
+ *  - hover：显示浅蓝实线边框，提示可点击边框拖动整个画框
+ *  - 选中态由内联 outline 处理（dashed），故 hover 描边不与之冲突
+ *  - 注意：使用 box-shadow 实现内描边，不影响 layout，也不与 outline 叠加
+ * ============================================================ */
+.overlay-draggable {
+  box-shadow: 0 0 0 1.5px transparent inset;
+  transition: box-shadow 120ms ease;
+}
+.overlay-draggable:hover {
+  box-shadow: 0 0 0 1.5px rgba(99, 102, 241, 0.55) inset; /* indigo-500 半透 */
+}
+.overlay-draggable:active {
   cursor: grabbing !important;
 }
 

@@ -6,7 +6,7 @@ import { PageView } from '../components/PageView';
 import { applyBookTheme } from '../bookTheme';
 import { VARIANTS, defaultVariantId } from '../layoutVariants';
 import { fileToPhoto } from '../imageUtils';
-import type { Book, BookPage, PageLayoutType, Photo, PhotoFocus, PhotoShape, Template } from '../types';
+import type { Book, BookPage, Overlay, OverlayPhoto, OverlayText, PageLayoutType, Photo, PhotoFocus, PhotoShape, Template } from '../types';
 
 /** 将数值约束到 [min, max] 区间 */
 function clamp(value: number, min: number, max: number): number {
@@ -41,6 +41,8 @@ export function BookEditorPage() {
   // - 非 null 时：处于"选中态"，点击图库里任意照片即可替换当前页对应 slot 为新图
   // 切页 / 点击空白会清空它
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
+  // 当前选中的叠层（自由画框 / 文字）；与 selectedPhotoId 互斥
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
 
   // 防抖落库
   const saveTimerRef = useRef<number | null>(null);
@@ -136,6 +138,7 @@ export function BookEditorPage() {
   // 切页时清除选中（选中只对当前页有意义）
   useEffect(() => {
     setSelectedPhotoId(null);
+    setSelectedOverlayId(null);
   }, [index]);
 
   if (!book) {
@@ -210,6 +213,68 @@ export function BookEditorPage() {
     next[slot] = isCenter ? undefined : focus;
     const clean = next.some((f) => !!f) ? next : undefined;
     patchCurrentPage({ photoFocus: clean });
+  }
+
+  /** 替换当前页 overlays 数组（OverlayLayer 拖拽完成后回调） */
+  function setOverlays(next: Overlay[]) {
+    patchCurrentPage({ overlays: next.length ? next : undefined });
+  }
+
+  /** 添加一个新叠层到当前页 */
+  function addOverlay(kind: 'text' | 'photo') {
+    const list = currentPage.overlays ?? [];
+    let ov: Overlay;
+    if (kind === 'text') {
+      ov = {
+        id: `ov_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
+        kind: 'text',
+        x: 30,
+        y: 40,
+        w: 40,
+        h: 12,
+        rotation: 0,
+        text: '点击编辑文字',
+        fontSize: 22,
+        color: template.colors.text,
+        fontFamily: template.fontFamily.title,
+        align: 'center',
+        background: 'transparent',
+      } as OverlayText;
+    } else {
+      // 选第一张可用照片作为默认
+      const firstPhoto = book?.photos[0];
+      if (!firstPhoto) {
+        alert('请先上传至少一张照片');
+        return;
+      }
+      ov = {
+        id: `ov_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
+        kind: 'photo',
+        x: 25,
+        y: 30,
+        w: 30,
+        h: 30,
+        rotation: 0,
+        photoId: firstPhoto.id,
+        shape: 'rect',
+      } as OverlayPhoto;
+    }
+    setOverlays([...list, ov]);
+    setSelectedPhotoId(null);
+    setSelectedOverlayId(ov.id);
+  }
+
+  /** 修改当前选中叠层的某些字段 */
+  function patchOverlay(id: string, patch: Partial<Overlay>) {
+    const list = currentPage.overlays ?? [];
+    setOverlays(list.map((o) => (o.id === id ? ({ ...o, ...patch } as Overlay) : o)));
+  }
+
+  /** 删除一个叠层 */
+  function removeOverlay(id: string) {
+    const list = currentPage.overlays ?? [];
+    setOverlays(list.filter((o) => o.id !== id));
+    if (selectedOverlayId === id) setSelectedOverlayId(null);
   }
 
   /**
@@ -698,10 +763,21 @@ export function BookEditorPage() {
               template={template}
               babyName={book.babyName}
               dateRange={book.dateRange}
-              onSelectPhoto={setSelectedPhotoId}
+              onSelectPhoto={(id) => {
+                setSelectedPhotoId(id);
+                // 点击下层照片或空白都同步清空 overlay 选中态（OverlayLayer 容器已透传，不再自管）
+                setSelectedOverlayId(null);
+              }}
               selectedPhotoId={selectedPhotoId}
               photoFrameColor={book.theme?.photoFrameColor ?? null}
               onAdjustFocus={handleAdjustFocus}
+              overlays={currentPage.overlays}
+              selectedOverlayId={selectedOverlayId}
+              onSelectOverlay={(id) => {
+                setSelectedOverlayId(id);
+                if (id) setSelectedPhotoId(null);
+              }}
+              onOverlaysChange={setOverlays}
             />
           </div>
 
@@ -808,6 +884,15 @@ export function BookEditorPage() {
                 onPickFromLibrary={handlePickFromLibrary}
                 onDeletePhoto={handleDeletePhoto}
                 onAddPhotos={openAddPhotos}
+                overlays={currentPage.overlays ?? []}
+                selectedOverlayId={selectedOverlayId}
+                onSelectOverlay={(id) => {
+                  setSelectedOverlayId(id);
+                  if (id) setSelectedPhotoId(null);
+                }}
+                onAddOverlay={addOverlay}
+                onPatchOverlay={patchOverlay}
+                onRemoveOverlay={removeOverlay}
               />
             )}
             {tab === 'theme' && (
@@ -1156,6 +1241,12 @@ function LayoutTab({
   onPickFromLibrary,
   onDeletePhoto,
   onAddPhotos,
+  overlays,
+  selectedOverlayId,
+  onSelectOverlay,
+  onAddOverlay,
+  onPatchOverlay,
+  onRemoveOverlay,
 }: {
   book: Book;
   page: BookPage;
@@ -1170,6 +1261,12 @@ function LayoutTab({
   onPickFromLibrary: (photoId: string) => void;
   onDeletePhoto: (photoId: string) => void;
   onAddPhotos: () => void;
+  overlays: Overlay[];
+  selectedOverlayId: string | null;
+  onSelectOverlay: (id: string | null) => void;
+  onAddOverlay: (kind: 'text' | 'photo') => void;
+  onPatchOverlay: (id: string, patch: Partial<Overlay>) => void;
+  onRemoveOverlay: (id: string) => void;
 }) {
   // 当前 layout 对应的 variant 清单（仅多图版式有）
   const variantKey = variantKeyOf(page.layout);
@@ -1382,7 +1479,319 @@ function LayoutTab({
           onAdd={onAddPhotos}
         />
       </Section>
+
+      {/* 叠层元素：自由添加文字 / 画框，可拖动旋转缩放 */}
+      <Section title="叠层元素" hint="自由添加可拖拽的画框 / 文字">
+        <OverlayPanel
+          book={book}
+          overlays={overlays}
+          selectedOverlayId={selectedOverlayId}
+          onSelectOverlay={onSelectOverlay}
+          onAddOverlay={onAddOverlay}
+          onPatchOverlay={onPatchOverlay}
+          onRemoveOverlay={onRemoveOverlay}
+        />
+      </Section>
     </div>
+  );
+}
+
+/* ============================================================
+ *  叠层面板（添加文字 / 画框、列表、选中后属性编辑）
+ * ============================================================ */
+function OverlayPanel({
+  book,
+  overlays,
+  selectedOverlayId,
+  onSelectOverlay,
+  onAddOverlay,
+  onPatchOverlay,
+  onRemoveOverlay,
+}: {
+  book: Book;
+  overlays: Overlay[];
+  selectedOverlayId: string | null;
+  onSelectOverlay: (id: string | null) => void;
+  onAddOverlay: (kind: 'text' | 'photo') => void;
+  onPatchOverlay: (id: string, patch: Partial<Overlay>) => void;
+  onRemoveOverlay: (id: string) => void;
+}) {
+  const selected = overlays.find((o) => o.id === selectedOverlayId) ?? null;
+
+  return (
+    <div className="space-y-3">
+      {/* 添加按钮 */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => onAddOverlay('text')}
+          className="py-1.5 rounded-md bg-rose/5 text-rose text-[12px] font-medium border border-dashed border-rose/40 hover:bg-rose/10 transition"
+        >
+          ＋ 添加文字
+        </button>
+        <button
+          onClick={() => onAddOverlay('photo')}
+          disabled={book.photos.length === 0}
+          className="py-1.5 rounded-md bg-indigo-50 text-indigo-600 text-[12px] font-medium border border-dashed border-indigo-300 hover:bg-indigo-100 transition disabled:opacity-50"
+        >
+          ＋ 添加画框
+        </button>
+      </div>
+
+      {/* 列表 */}
+      {overlays.length === 0 ? (
+        <div className="text-[11px] text-neutral-400 text-center py-4 rounded-lg border border-dashed border-neutral-200 bg-neutral-50">
+          还没有叠层元素 · 点上方按钮添加，添加后可在预览里直接拖动 / 缩放 / 旋转
+        </div>
+      ) : (
+        <div className="rounded-lg border border-neutral-200 divide-y divide-neutral-100 overflow-hidden">
+          {overlays.map((ov) => {
+            const active = ov.id === selectedOverlayId;
+            return (
+              <div
+                key={ov.id}
+                className={`flex items-center gap-2 px-2 py-1.5 text-[11px] cursor-pointer ${
+                  active ? 'bg-rose/5' : 'bg-white hover:bg-neutral-50'
+                }`}
+                onClick={() => onSelectOverlay(ov.id)}
+              >
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full ${active ? 'bg-rose' : 'bg-neutral-300'}`}
+                />
+                <span className={`flex-1 truncate ${active ? 'text-rose font-medium' : 'text-neutral-700'}`}>
+                  {ov.kind === 'text'
+                    ? `文字 · ${(ov as OverlayText).text || '(空)'}`
+                    : `画框 · ${book.photos.find((p) => p.id === (ov as OverlayPhoto).photoId)?.id?.slice(0, 6) ?? '已删除'}`}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('删除该叠层？')) onRemoveOverlay(ov.id);
+                  }}
+                  className="text-neutral-400 hover:text-rose-600 px-1"
+                  title="删除"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 选中态：属性编辑 */}
+      {selected && (
+        <div className="rounded-lg border border-rose/30 bg-rose/5 p-2.5 space-y-2.5">
+          <div className="text-[11px] text-rose font-medium">
+            编辑选中{selected.kind === 'text' ? '文字' : '画框'} · 在预览中可直接拖动 / 缩放 / 旋转
+          </div>
+
+          {selected.kind === 'text' && (
+            <OverlayTextEditor
+              overlay={selected as OverlayText}
+              onPatch={(patch) => onPatchOverlay(selected.id, patch)}
+            />
+          )}
+          {selected.kind === 'photo' && (
+            <OverlayPhotoEditor
+              book={book}
+              overlay={selected as OverlayPhoto}
+              onPatch={(patch) => onPatchOverlay(selected.id, patch)}
+            />
+          )}
+
+          {/* 通用：旋转 / 删除 */}
+          <div className="flex items-center gap-2 pt-1 border-t border-rose/20">
+            <label className="text-[11px] text-neutral-600">旋转</label>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              step={1}
+              value={selected.rotation ?? 0}
+              onChange={(e) => onPatchOverlay(selected.id, { rotation: Number(e.target.value) })}
+              className="flex-1"
+            />
+            <span className="text-[11px] text-neutral-500 tabular-nums w-9 text-right">
+              {Math.round(selected.rotation ?? 0)}°
+            </span>
+            <button
+              onClick={() => onPatchOverlay(selected.id, { rotation: 0 })}
+              className="text-[11px] text-neutral-500 hover:text-rose px-1"
+              title="重置旋转"
+            >
+              ↺
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              if (confirm('删除该叠层？')) onRemoveOverlay(selected.id);
+            }}
+            className="w-full py-1 rounded-md bg-white text-rose text-[11px] border border-rose/30 hover:bg-rose/10"
+          >
+            删除该叠层
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 文字叠层属性编辑 */
+function OverlayTextEditor({
+  overlay,
+  onPatch,
+}: {
+  overlay: OverlayText;
+  onPatch: (patch: Partial<OverlayText>) => void;
+}) {
+  return (
+    <>
+      <div>
+        <label className="block text-[11px] text-neutral-600 mb-1">文字内容</label>
+        <textarea
+          value={overlay.text}
+          onChange={(e) => onPatch({ text: e.target.value })}
+          rows={2}
+          className="w-full px-2 py-1.5 text-[12px] rounded border border-neutral-300 bg-white focus:outline-none focus:border-rose"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-[11px] text-neutral-600 mb-1">字号</label>
+          <input
+            type="number"
+            min={8}
+            max={120}
+            value={overlay.fontSize ?? 22}
+            onChange={(e) => onPatch({ fontSize: Math.max(8, Math.min(120, Number(e.target.value) || 22)) })}
+            className="w-full px-2 py-1 text-[12px] rounded border border-neutral-300 bg-white"
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] text-neutral-600 mb-1">字色</label>
+          <div className="flex items-center gap-1">
+            <input
+              type="color"
+              value={overlay.color ?? '#222222'}
+              onChange={(e) => onPatch({ color: e.target.value })}
+              className="w-8 h-8 rounded border border-neutral-300 cursor-pointer"
+            />
+            <input
+              type="text"
+              value={overlay.color ?? '#222222'}
+              onChange={(e) => onPatch({ color: e.target.value })}
+              className="flex-1 px-2 py-1 text-[11px] rounded border border-neutral-300 bg-white"
+            />
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {(['left', 'center', 'right'] as const).map((a) => {
+          const active = (overlay.align ?? 'center') === a;
+          return (
+            <button
+              key={a}
+              onClick={() => onPatch({ align: a })}
+              className={`py-1 text-[11px] rounded border ${active ? 'border-rose bg-rose/10 text-rose' : 'border-neutral-200 bg-white text-neutral-600'}`}
+            >
+              {a === 'left' ? '左对齐' : a === 'center' ? '居中' : '右对齐'}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex gap-1.5">
+        <button
+          onClick={() => onPatch({ bold: !overlay.bold })}
+          className={`flex-1 py-1 text-[11px] rounded border ${overlay.bold ? 'border-rose bg-rose/10 text-rose font-bold' : 'border-neutral-200 bg-white text-neutral-600'}`}
+        >
+          B 加粗
+        </button>
+        <button
+          onClick={() => onPatch({ italic: !overlay.italic })}
+          className={`flex-1 py-1 text-[11px] rounded border italic ${overlay.italic ? 'border-rose bg-rose/10 text-rose' : 'border-neutral-200 bg-white text-neutral-600'}`}
+        >
+          I 斜体
+        </button>
+      </div>
+      <div>
+        <label className="block text-[11px] text-neutral-600 mb-1">背景</label>
+        <div className="grid grid-cols-5 gap-1">
+          {['transparent', '#FFFFFF', '#FFF1F2', '#FEF3C7', '#E0F2FE'].map((bg) => {
+            const active = (overlay.background ?? 'transparent') === bg;
+            return (
+              <button
+                key={bg}
+                onClick={() => onPatch({ background: bg })}
+                className={`h-7 rounded border ${active ? 'border-rose ring-1 ring-rose' : 'border-neutral-300'}`}
+                style={{
+                  background: bg === 'transparent' ? 'repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 8px 8px' : bg,
+                }}
+                title={bg}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** 图片叠层属性编辑：换图 + 形状 */
+function OverlayPhotoEditor({
+  book,
+  overlay,
+  onPatch,
+}: {
+  book: Book;
+  overlay: OverlayPhoto;
+  onPatch: (patch: Partial<OverlayPhoto>) => void;
+}) {
+  const SHAPES: { value: PhotoShape; label: string }[] = [
+    { value: 'rect', label: '矩形' },
+    { value: 'rounded', label: '圆角' },
+    { value: 'circle', label: '圆形' },
+    { value: 'heart', label: '心形' },
+    { value: 'star', label: '星形' },
+    { value: 'hexagon', label: '六边形' },
+  ];
+  return (
+    <>
+      <div>
+        <label className="block text-[11px] text-neutral-600 mb-1">引用照片（点击换图）</label>
+        <div className="grid grid-cols-5 gap-1 max-h-[120px] overflow-y-auto rounded border border-neutral-200 bg-white p-1">
+          {book.photos.map((p) => {
+            const active = p.id === overlay.photoId;
+            return (
+              <button
+                key={p.id}
+                onClick={() => onPatch({ photoId: p.id })}
+                className={`block aspect-square rounded overflow-hidden border ${active ? 'border-rose ring-1 ring-rose' : 'border-neutral-200'}`}
+              >
+                <img src={p.src} className="w-full h-full object-cover" draggable={false} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <label className="block text-[11px] text-neutral-600 mb-1">形状</label>
+        <div className="grid grid-cols-3 gap-1">
+          {SHAPES.map((s) => {
+            const active = (overlay.shape ?? 'rect') === s.value;
+            return (
+              <button
+                key={s.value}
+                onClick={() => onPatch({ shape: s.value })}
+                className={`py-1 text-[11px] rounded border flex items-center justify-center gap-1 ${active ? 'border-rose bg-rose/10 text-rose font-medium' : 'border-neutral-200 bg-white text-neutral-600'}`}
+              >
+                <ShapeIcon shape={s.value} active={active} />
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }
 
