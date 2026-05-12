@@ -1,21 +1,33 @@
-// 自定义模板编辑器
+// 自定义模板编辑器（自由画布版）
 // - /templates/new          新建
 // - /templates/edit/:id     编辑已有自定义模板
 //
-// 左侧：表单（分组配置：基础信息 / 风格骨架 / 配色 / 字体 / 背景 / 装饰 / 默认文案）
-// 右侧：实时效果预览（直接复用 PageView + 内置示例照片）
-// 底部：保存 / 取消
+// 布局：
+//   - 顶部：模板名 + 取消 / 保存
+//   - 主区分三栏：
+//       左   = 页列表（添加 / 删除 / 重排）
+//       中   = 自由画布（PageView，editable=true，直接拖拽元素）
+//       右   = 当前页工具栏 + 选中元素属性面板
+//   - 底部 = 折叠的"模板外观"（基础信息 / 配色 / 字体 / 背景 / 装饰），作用于整本模板
 //
-// 所有字段都直接映射到 Template 接口，保存时写入 IndexedDB，
-// 不需要修改 PageView 的任何渲染代码。
+// 数据模型：
+//   - 模板自身存配色/字体/装饰等"全局外观"
+//   - 模板的页存于 template.pages: TemplatePage[]
+//   - 每页固定 layout='free'，元素都用 overlays 描述（百分比坐标 + 旋转）
+//   - OverlayPhoto.placeholder=true 表示占位槽位（创建画册时按顺序填入用户照片）
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   BookPage,
-  LayoutVariants,
+  Overlay,
+  OverlayPhoto,
+  OverlayText,
+  Photo,
+  PhotoShape,
   Template,
   TemplateCategory,
+  TemplatePage,
   TemplateStyle,
 } from '../types';
 import { PageView } from '../components/PageView';
@@ -27,7 +39,6 @@ import {
   type UserTemplate,
 } from '../userTemplates';
 import { useTemplateRegistry } from '../TemplateRegistry';
-import { VARIANTS, defaultVariantId } from '../layoutVariants';
 
 // —————————— 选项常量 ——————————
 
@@ -64,7 +75,7 @@ const FONT_BODY_OPTIONS: { label: string; value: string }[] = [
   { label: '衬线正文（Georgia）', value: 'Georgia, serif' },
 ];
 
-// 6 种预设背景底纹（用户可直接点选，也可自己编辑 CSS）
+// 6 种预设背景底纹
 const BG_PRESETS: { label: string; make: (c1: string, c2: string) => string }[] = [
   {
     label: '柔光圆斑',
@@ -73,8 +84,7 @@ const BG_PRESETS: { label: string; make: (c1: string, c2: string) => string }[] 
   },
   {
     label: '斜纹条纹',
-    make: (c1, _c2) =>
-      `repeating-linear-gradient(45deg, transparent 0 20px, ${c1} 20px 22px)`,
+    make: (c1) => `repeating-linear-gradient(45deg, transparent 0 20px, ${c1} 20px 22px)`,
   },
   {
     label: '上下双渐变',
@@ -82,7 +92,7 @@ const BG_PRESETS: { label: string; make: (c1: string, c2: string) => string }[] 
   },
   {
     label: '格纹笔记',
-    make: (c1, _c2) =>
+    make: (c1) =>
       `repeating-linear-gradient(90deg, ${c1} 0 40px, transparent 40px 80px), repeating-linear-gradient(0deg, ${c1} 0 40px, transparent 40px 80px)`,
   },
   {
@@ -90,24 +100,81 @@ const BG_PRESETS: { label: string; make: (c1: string, c2: string) => string }[] 
     make: (c1, c2) =>
       `radial-gradient(circle at 20% 30%, ${c1} 0 80px, transparent 80px), radial-gradient(circle at 80% 75%, ${c2} 0 100px, transparent 100px)`,
   },
-  {
-    label: '纯色（无纹）',
-    make: () => '',
-  },
+  { label: '纯色（无纹）', make: () => '' },
 ];
 
-// 色带：转成含透明度的版本，用于底纹
+const PHOTO_SHAPES: { key: PhotoShape; label: string }[] = [
+  { key: 'rect', label: '矩形' },
+  { key: 'rounded', label: '圆角' },
+  { key: 'circle', label: '圆形' },
+  { key: 'heart', label: '心形' },
+  { key: 'star', label: '星形' },
+  { key: 'hexagon', label: '六边形' },
+];
+
+// —————————— 工具函数 ——————————
+
 function withAlpha(hex: string, alpha: number): string {
   if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex)) return hex;
   let h = hex.slice(1);
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length === 3)
+    h = h
+      .split('')
+      .map((c) => c + c)
+      .join('');
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function uid(prefix: string) {
+  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function normalizeHex(v: string): string {
+  if (/^#[0-9a-f]{6}$/i.test(v)) return v;
+  if (/^#[0-9a-f]{3}$/i.test(v)) {
+    const h = v.slice(1);
+    return '#' + h.split('').map((c) => c + c).join('');
+  }
+  return '#000000';
+}
+
 // —————————— 默认值 ——————————
+
+function makeDefaultPage(): TemplatePage {
+  // 默认每页放 1 张占位图 + 1 个标题
+  return {
+    id: uid('p'),
+    photoSlotCount: 1,
+    overlays: [
+      {
+        id: uid('ov'),
+        kind: 'photo',
+        x: 12,
+        y: 18,
+        w: 76,
+        h: 60,
+        photoId: '',
+        placeholder: true,
+        shape: 'rounded',
+      },
+      {
+        id: uid('ov'),
+        kind: 'text',
+        x: 10,
+        y: 82,
+        w: 80,
+        h: 10,
+        text: '在这里写下宝宝的成长故事…',
+        fontSize: 22,
+        align: 'center',
+        color: '#3F2A1B',
+      },
+    ],
+  };
+}
 
 function defaultDraft(): UserTemplate {
   return {
@@ -115,7 +182,7 @@ function defaultDraft(): UserTemplate {
     name: '我的自定义模板',
     category: '温馨手绘',
     style: 'watercolor',
-    description: '自由配色 + 手写标题，独一无二',
+    description: '自由布局 + 自定义页数',
     isFree: true,
     colors: {
       bg: '#FFF1E6',
@@ -124,74 +191,28 @@ function defaultDraft(): UserTemplate {
       accent: '#F4A261',
       text: '#4A2C1E',
     },
-    fontFamily: {
-      title: 'Caveat, cursive',
-      body: 'PingFang SC, sans-serif',
-    },
+    fontFamily: { title: 'Caveat, cursive', body: 'PingFang SC, sans-serif' },
     backgroundPattern:
       'radial-gradient(ellipse at 10% 0%, rgba(231,111,81,0.18) 0%, transparent 55%), radial-gradient(ellipse at 100% 100%, rgba(244,162,97,0.18) 0%, transparent 55%)',
     decorations: ['🌸', '🍃', '✿'],
     defaultTitle: '宝贝的时光',
     defaultSubtitle: 'Sweet Moments',
-    layoutVariants: {
-      double: defaultVariantId('double'),
-      triple: defaultVariantId('triple'),
-      grid4: defaultVariantId('grid4'),
-      grid5: defaultVariantId('grid5'),
-      grid6: defaultVariantId('grid6'),
-    },
+    pages: [makeDefaultPage()],
     isUser: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
 
-// 预览用的 6 页样板：封面 + 2/3/4/5/6 图页
-// 让用户切到任一版式都能实时看到自己选的 variant 效果
-function buildPreviewPages(draft: UserTemplate): BookPage[] {
-  const ids = SAMPLE_PHOTOS.slice(0, 7).map((p) => p.id);
-  return [
-    {
-      id: 'pv-cover',
-      layout: 'cover',
-      photoIds: [ids[0]],
-      title: draft.defaultTitle || '宝贝的时光',
-      subtitle: draft.defaultSubtitle || 'Sweet Moments',
-    },
-    {
-      id: 'pv-d1',
-      layout: 'double',
-      photoIds: ids.slice(1, 3),
-      caption: '第一次学会笑，第一次牵手…',
-    },
-    {
-      id: 'pv-t1',
-      layout: 'triple',
-      photoIds: ids.slice(1, 4),
-      caption: '吃、笑、睡 —— 每一刻都可爱',
-    },
-    {
-      id: 'pv-g4',
-      layout: 'grid4',
-      photoIds: ids.slice(1, 5),
-      caption: '四格回忆',
-    },
-    {
-      id: 'pv-g5',
-      layout: 'grid5',
-      photoIds: ids.slice(1, 6),
-      caption: '五格片段',
-    },
-    {
-      id: 'pv-g6',
-      layout: 'grid6',
-      photoIds: ids.slice(1, 7),
-      caption: '六格拼图',
-    },
-  ];
+/** 把 TemplatePage 转成 PageView 能渲染的 BookPage（free 版式 + overlays） */
+function pageToBookPage(tp: TemplatePage): BookPage {
+  return {
+    id: tp.id,
+    layout: 'free',
+    photoIds: [], // free 版式不依赖 photoIds
+    overlays: tp.overlays,
+  };
 }
-
-const PREVIEW_TABS = ['封面', '双图', '三图', '四图', '五图', '六图'] as const;
 
 // —————————— 组件 ——————————
 
@@ -204,7 +225,12 @@ export function TemplateEditorPage() {
   const [draft, setDraft] = useState<UserTemplate | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [previewPageIndex, setPreviewPageIndex] = useState(0);
+  const [pageIdx, setPageIdx] = useState(0);
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const [showAppearance, setShowAppearance] = useState(false);
+
+  // 模板编辑器内置一组示例图片，用于 OverlayPhoto 槽位"在编辑器中预览图片"模式
+  const [previewBoundPhotos, setPreviewBoundPhotos] = useState(false);
 
   // 加载（编辑时）或初始化
   useEffect(() => {
@@ -218,14 +244,13 @@ export function TemplateEditorPage() {
         setLoadError('找不到该模板，可能已被删除。');
         return;
       }
+      // 老数据兼容：没有 pages 字段则补一页默认
+      if (!existing.pages || existing.pages.length === 0) {
+        existing.pages = [makeDefaultPage()];
+      }
       setDraft(existing);
     })();
   }, [id]);
-
-  const previewPages = useMemo(
-    () => (draft ? buildPreviewPages(draft) : []),
-    [draft?.defaultTitle, draft?.defaultSubtitle],
-  );
 
   if (loadError) {
     return (
@@ -241,12 +266,16 @@ export function TemplateEditorPage() {
       </div>
     );
   }
-
   if (!draft) {
     return <div className="py-20 text-center text-neutral-500">加载中…</div>;
   }
 
-  // —— 修改器 —— 浅合并，避免重复写 setter
+  const pages = draft.pages ?? [];
+  const currentPage = pages[pageIdx] ?? pages[0];
+  const selectedOverlay =
+    currentPage?.overlays.find((o) => o.id === selectedOverlayId) ?? null;
+
+  // —— 修改器（浅合并）——
   const update = (patch: Partial<UserTemplate>) =>
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
   const updateColors = (patch: Partial<Template['colors']>) =>
@@ -255,24 +284,158 @@ export function TemplateEditorPage() {
     setDraft((prev) =>
       prev ? { ...prev, fontFamily: { ...prev.fontFamily, ...patch } } : prev,
     );
-  const updateVariant = (patch: Partial<LayoutVariants>) =>
-    setDraft((prev) =>
-      prev
-        ? { ...prev, layoutVariants: { ...(prev.layoutVariants ?? {}), ...patch } }
-        : prev,
-    );
 
-  const handleApplyBgPreset = (
-    make: (c1: string, c2: string) => string,
-  ) => {
-    const c1 = withAlpha(draft.colors.primary, 0.18);
-    const c2 = withAlpha(draft.colors.accent, 0.18);
-    update({ backgroundPattern: make(c1, c2) });
+  const updatePages = (mapper: (pages: TemplatePage[]) => TemplatePage[]) =>
+    setDraft((prev) => (prev ? { ...prev, pages: mapper(prev.pages ?? []) } : prev));
+
+  const patchCurrentPage = (patch: Partial<TemplatePage>) => {
+    updatePages((all) => all.map((p, i) => (i === pageIdx ? { ...p, ...patch } : p)));
+  };
+
+  const patchOverlay = (overlayId: string, patch: Partial<Overlay>) => {
+    updatePages((all) =>
+      all.map((p, i) => {
+        if (i !== pageIdx) return p;
+        return {
+          ...p,
+          overlays: p.overlays.map((o) =>
+            o.id === overlayId ? ({ ...o, ...patch } as Overlay) : o,
+          ),
+        };
+      }),
+    );
+  };
+
+  const removeOverlay = (overlayId: string) => {
+    updatePages((all) =>
+      all.map((p, i) => {
+        if (i !== pageIdx) return p;
+        const next = p.overlays.filter((o) => o.id !== overlayId);
+        // 重新计算 photoSlotCount
+        return {
+          ...p,
+          overlays: next,
+          photoSlotCount: next.filter((o) => o.kind === 'photo').length,
+        };
+      }),
+    );
+    if (selectedOverlayId === overlayId) setSelectedOverlayId(null);
+  };
+
+  const addPhotoOverlay = () => {
+    const overlay: OverlayPhoto = {
+      id: uid('ov'),
+      kind: 'photo',
+      x: 20,
+      y: 20,
+      w: 50,
+      h: 50,
+      photoId: '',
+      placeholder: true,
+      shape: 'rounded',
+    };
+    updatePages((all) =>
+      all.map((p, i) =>
+        i === pageIdx
+          ? {
+              ...p,
+              overlays: [...p.overlays, overlay],
+              photoSlotCount: p.photoSlotCount + 1,
+            }
+          : p,
+      ),
+    );
+    setSelectedOverlayId(overlay.id);
+  };
+
+  const addTextOverlay = (preset?: 'title' | 'subtitle' | 'caption') => {
+    const overlay: OverlayText = {
+      id: uid('ov'),
+      kind: 'text',
+      x: 12,
+      y: preset === 'title' ? 8 : preset === 'subtitle' ? 18 : 80,
+      w: 76,
+      h: preset === 'title' ? 12 : 10,
+      text:
+        preset === 'title'
+          ? draft.defaultTitle || '标题'
+          : preset === 'subtitle'
+          ? draft.defaultSubtitle || '副标题'
+          : '在这里写下文字…',
+      fontSize: preset === 'title' ? 36 : preset === 'subtitle' ? 22 : 16,
+      align: 'center',
+      color: preset === 'title' ? draft.colors.primary : draft.colors.text,
+      fontFamily: preset === 'title' ? draft.fontFamily.title : draft.fontFamily.body,
+      bold: preset === 'title',
+    };
+    updatePages((all) =>
+      all.map((p, i) =>
+        i === pageIdx ? { ...p, overlays: [...p.overlays, overlay] } : p,
+      ),
+    );
+    setSelectedOverlayId(overlay.id);
+  };
+
+  const handleOverlaysChange = (next: Overlay[]) => {
+    patchCurrentPage({ overlays: next });
+  };
+
+  // —— 页操作 ——
+  const addPage = () => {
+    const np = makeDefaultPage();
+    updatePages((all) => [...all, np]);
+    setPageIdx(pages.length); // 跳到新页
+    setSelectedOverlayId(null);
+  };
+
+  const duplicatePage = (i: number) => {
+    updatePages((all) => {
+      const src = all[i];
+      if (!src) return all;
+      // 深拷贝 overlays，并重新分配 id
+      const cloned: TemplatePage = {
+        ...src,
+        id: uid('p'),
+        overlays: src.overlays.map((o) => ({ ...o, id: uid('ov') })),
+      };
+      const out = [...all];
+      out.splice(i + 1, 0, cloned);
+      return out;
+    });
+    setPageIdx(i + 1);
+    setSelectedOverlayId(null);
+  };
+
+  const deletePage = (i: number) => {
+    if (pages.length <= 1) {
+      alert('至少保留 1 页');
+      return;
+    }
+    if (!confirm(`确定删除第 ${i + 1} 页？`)) return;
+    updatePages((all) => all.filter((_, idx) => idx !== i));
+    setPageIdx((cur) => (cur >= i ? Math.max(0, cur - 1) : cur));
+    setSelectedOverlayId(null);
+  };
+
+  const movePage = (i: number, delta: -1 | 1) => {
+    const j = i + delta;
+    if (j < 0 || j >= pages.length) return;
+    updatePages((all) => {
+      const out = [...all];
+      const [p] = out.splice(i, 1);
+      out.splice(j, 0, p);
+      return out;
+    });
+    setPageIdx(j);
   };
 
   const handleSave = async () => {
     if (!draft.name.trim()) {
       alert('请先填写模板名称');
+      return;
+    }
+    if (!draft.pages || draft.pages.length === 0) {
+      alert('至少添加 1 页');
       return;
     }
     setSaving(true);
@@ -284,6 +447,11 @@ export function TemplateEditorPage() {
         defaultTitle: draft.defaultTitle.trim() || '宝贝的时光',
         defaultSubtitle: draft.defaultSubtitle.trim() || 'Sweet Moments',
         decorations: draft.decorations.filter((s) => s.trim().length > 0),
+        // 保存时同步 photoSlotCount
+        pages: (draft.pages ?? []).map((p) => ({
+          ...p,
+          photoSlotCount: p.overlays.filter((o) => o.kind === 'photo').length,
+        })),
         updatedAt: Date.now(),
       };
       await saveUserTemplate(toSave);
@@ -294,401 +462,928 @@ export function TemplateEditorPage() {
     }
   };
 
-  const previewPage = previewPages[previewPageIndex] ?? previewPages[0];
-
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
-      {/* 顶部标题栏 */}
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold">
-            {isEditMode ? '编辑模板' : '创建自定义模板'}
-          </h1>
-          <p className="text-xs text-neutral-500 mt-1">
-            自由配置配色、字体、装饰与背景，右侧即时预览
-          </p>
+    <div className="mx-auto max-w-[1400px] px-4 py-4">
+      {/* 顶部 */}
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <button
+            onClick={() => navigate('/templates')}
+            className="text-neutral-500 hover:text-neutral-900 text-sm whitespace-nowrap"
+          >
+            ← 返回模板
+          </button>
+          <input
+            type="text"
+            value={draft.name}
+            onChange={(e) => update({ name: e.target.value })}
+            className="font-display text-xl font-bold bg-transparent outline-none min-w-0 flex-1 max-w-md border-b border-transparent focus:border-neutral-300 py-1"
+            placeholder="模板名称"
+            maxLength={20}
+          />
+          <span className="text-xs text-neutral-400 hidden md:inline">
+            {isEditMode ? '编辑模板' : '新建模板'} · 共 {pages.length} 页
+          </span>
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => navigate('/templates')}
-            className="px-4 py-2 rounded-full bg-neutral-100 hover:bg-neutral-200 text-sm"
+            onClick={() => setPreviewBoundPhotos((v) => !v)}
+            className={`px-3 py-2 rounded-full text-xs whitespace-nowrap ${
+              previewBoundPhotos
+                ? 'bg-neutral-900 text-white'
+                : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700'
+            }`}
+            title="切换：把图片槽位用示例照片填充预览效果"
           >
-            取消
+            {previewBoundPhotos ? '预览模式（示例图）' : '设计模式（占位）'}
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-5 py-2 rounded-full bg-neutral-900 text-white text-sm shadow hover:opacity-90 disabled:opacity-50"
+            className="px-5 py-2 rounded-full bg-neutral-900 text-white text-sm shadow hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
           >
             {saving ? '保存中…' : isEditMode ? '保存修改' : '保存模板'}
           </button>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] gap-5">
-        {/* ——— 左：表单 ——— */}
-        <div className="space-y-4 min-w-0">
-          <Section title="基础信息">
-            <Field label="模板名称">
-              <input
-                type="text"
-                value={draft.name}
-                onChange={(e) => update({ name: e.target.value })}
-                placeholder="如：奶油拿铁、森系日记…"
-                className="input"
-                maxLength={20}
-              />
-            </Field>
-            <Field label="简短描述">
-              <input
-                type="text"
-                value={draft.description}
-                onChange={(e) => update({ description: e.target.value })}
-                placeholder="一句话描述这个模板的特色"
-                className="input"
-                maxLength={50}
-              />
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="分类">
-                <select
-                  value={draft.category}
-                  onChange={(e) =>
-                    update({ category: e.target.value as TemplateCategory })
-                  }
-                  className="input"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="标记">
-                <label className="flex items-center gap-2 text-sm h-[38px] px-3 rounded-lg border border-neutral-200 bg-white">
-                  <input
-                    type="checkbox"
-                    checked={draft.isFree}
-                    onChange={(e) => update({ isFree: e.target.checked })}
-                  />
-                  <span>免费模板</span>
-                </label>
-              </Field>
-            </div>
-          </Section>
+      {/* 三栏主区 */}
+      <div className="grid grid-cols-[200px_minmax(0,1fr)_280px] gap-4 min-h-[600px]">
+        {/* —— 左：页列表 —— */}
+        <PageListPanel
+          draft={draft}
+          pageIdx={pageIdx}
+          onSelect={(i) => {
+            setPageIdx(i);
+            setSelectedOverlayId(null);
+          }}
+          onAdd={addPage}
+          onDuplicate={duplicatePage}
+          onDelete={deletePage}
+          onMove={movePage}
+        />
 
-          <Section title="视觉风格骨架">
-            <p className="text-[11px] text-neutral-500 mb-2">
-              选择一种风格骨架，决定照片相框和排版的样式（装饰细节）
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {STYLE_OPTIONS.map((s) => (
-                <button
-                  key={s.key}
-                  type="button"
-                  onClick={() => update({ style: s.key })}
-                  className={`text-left p-2.5 rounded-lg border transition ${
-                    draft.style === s.key
-                      ? 'border-neutral-900 bg-neutral-900 text-white'
-                      : 'border-neutral-200 bg-white hover:border-neutral-400'
-                  }`}
-                >
-                  <div className="text-sm font-medium">{s.label}</div>
-                  <div
-                    className={`text-[10px] leading-tight mt-0.5 ${
-                      draft.style === s.key ? 'text-white/70' : 'text-neutral-500'
-                    }`}
-                  >
-                    {s.hint}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </Section>
+        {/* —— 中：自由画布 —— */}
+        <CanvasArea
+          draft={draft}
+          page={currentPage}
+          previewBound={previewBoundPhotos}
+          selectedOverlayId={selectedOverlayId}
+          onSelectOverlay={setSelectedOverlayId}
+          onOverlaysChange={handleOverlaysChange}
+        />
 
-          <Section title="配色方案">
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-              <ColorField
-                label="页面底色"
-                hint="整页背景"
-                value={draft.colors.bg}
-                onChange={(v) => updateColors({ bg: v })}
-              />
-              <ColorField
-                label="纸张底色"
-                hint="单页纸"
-                value={draft.colors.paper}
-                onChange={(v) => updateColors({ paper: v })}
-              />
-              <ColorField
-                label="主色"
-                hint="标题/装饰"
-                value={draft.colors.primary}
-                onChange={(v) => updateColors({ primary: v })}
-              />
-              <ColorField
-                label="强调色"
-                hint="次要装饰"
-                value={draft.colors.accent}
-                onChange={(v) => updateColors({ accent: v })}
-              />
-              <ColorField
-                label="正文色"
-                hint="文字颜色"
-                value={draft.colors.text}
-                onChange={(v) => updateColors({ text: v })}
-              />
-            </div>
-          </Section>
+        {/* —— 右：工具 + 属性 —— */}
+        <RightPanel
+          draft={draft}
+          page={currentPage}
+          selectedOverlay={selectedOverlay}
+          onAddPhoto={addPhotoOverlay}
+          onAddText={addTextOverlay}
+          onPatchOverlay={patchOverlay}
+          onRemoveOverlay={removeOverlay}
+        />
+      </div>
 
-          <Section title="字体">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="标题字体">
-                <select
-                  value={draft.fontFamily.title}
-                  onChange={(e) => updateFont({ title: e.target.value })}
-                  className="input"
-                  style={{ fontFamily: draft.fontFamily.title }}
-                >
-                  {FONT_TITLE_OPTIONS.map((f) => (
-                    <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="正文字体">
-                <select
-                  value={draft.fontFamily.body}
-                  onChange={(e) => updateFont({ body: e.target.value })}
-                  className="input"
-                  style={{ fontFamily: draft.fontFamily.body }}
-                >
-                  {FONT_BODY_OPTIONS.map((f) => (
-                    <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          </Section>
-
-          <Section title="背景底纹">
-            <p className="text-[11px] text-neutral-500 mb-2">
-              点击任一预设快速应用（会基于当前「主色/强调色」生成）
-            </p>
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              {BG_PRESETS.map((p) => {
-                const c1 = withAlpha(draft.colors.primary, 0.18);
-                const c2 = withAlpha(draft.colors.accent, 0.18);
-                const css = p.make(c1, c2);
-                return (
-                  <button
-                    key={p.label}
-                    type="button"
-                    onClick={() => handleApplyBgPreset(p.make)}
-                    className="rounded-lg border border-neutral-200 hover:border-neutral-400 overflow-hidden text-left"
-                  >
-                    <div
-                      className="h-16"
-                      style={{
-                        background: css
-                          ? `${css}, ${draft.colors.paper}`
-                          : draft.colors.paper,
-                      }}
-                    />
-                    <div className="text-[11px] px-2 py-1">{p.label}</div>
-                  </button>
-                );
-              })}
-            </div>
-            <Field label="或直接编辑 CSS background">
-              <textarea
-                value={draft.backgroundPattern ?? ''}
-                onChange={(e) => update({ backgroundPattern: e.target.value })}
-                placeholder="linear-gradient(...) / radial-gradient(...) / 留空表示纯色"
-                className="input font-mono text-[11px] h-16 resize-none"
-              />
-            </Field>
-          </Section>
-
-          <Section title="装饰元素">
-            <p className="text-[11px] text-neutral-500 mb-2">
-              最多 6 个 emoji 或符号，用于页面点缀（逗号分隔）
-            </p>
-            <input
-              type="text"
-              value={draft.decorations.join(',')}
-              onChange={(e) =>
-                update({
-                  decorations: e.target.value
-                    .split(/[,，]/)
-                    .map((s) => s.trim())
-                    .filter(Boolean)
-                    .slice(0, 6),
-                })
-              }
-              placeholder="🌸,🍃,✿"
-              className="input"
-            />
-            <div className="mt-2 flex gap-2 text-2xl">
-              {draft.decorations.map((d, i) => (
-                <span key={i}>{d}</span>
-              ))}
-            </div>
-          </Section>
-
-          <Section title="默认文案">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="默认标题">
-                <input
-                  type="text"
-                  value={draft.defaultTitle}
-                  onChange={(e) => update({ defaultTitle: e.target.value })}
-                  placeholder="宝贝的时光"
-                  className="input"
-                  maxLength={16}
-                />
-              </Field>
-              <Field label="默认副标题">
-                <input
-                  type="text"
-                  value={draft.defaultSubtitle}
-                  onChange={(e) => update({ defaultSubtitle: e.target.value })}
-                  placeholder="Sweet Moments"
-                  className="input"
-                  maxLength={20}
-                />
-              </Field>
-            </div>
-          </Section>
-
-          <Section title="版式方案">
-            <p className="text-[11px] text-neutral-500 mb-2">
-              为每种多图页面选择排版方案；右侧预览会即时切换效果
-            </p>
-            <VariantPicker
-              title="双图页"
-              tabIndex={1}
-              variants={VARIANTS.double}
-              value={draft.layoutVariants?.double ?? defaultVariantId('double')}
-              onChange={(id) => {
-                updateVariant({ double: id });
-                setPreviewPageIndex(1);
-              }}
-            />
-            <VariantPicker
-              title="三图页"
-              tabIndex={2}
-              variants={VARIANTS.triple}
-              value={draft.layoutVariants?.triple ?? defaultVariantId('triple')}
-              onChange={(id) => {
-                updateVariant({ triple: id });
-                setPreviewPageIndex(2);
-              }}
-            />
-            <VariantPicker
-              title="四图页"
-              tabIndex={3}
-              variants={VARIANTS.grid4}
-              value={draft.layoutVariants?.grid4 ?? defaultVariantId('grid4')}
-              onChange={(id) => {
-                updateVariant({ grid4: id });
-                setPreviewPageIndex(3);
-              }}
-            />
-            <VariantPicker
-              title="五图页"
-              tabIndex={4}
-              variants={VARIANTS.grid5}
-              value={draft.layoutVariants?.grid5 ?? defaultVariantId('grid5')}
-              onChange={(id) => {
-                updateVariant({ grid5: id });
-                setPreviewPageIndex(4);
-              }}
-            />
-            <VariantPicker
-              title="六图页"
-              tabIndex={5}
-              variants={VARIANTS.grid6}
-              value={draft.layoutVariants?.grid6 ?? defaultVariantId('grid6')}
-              onChange={(id) => {
-                updateVariant({ grid6: id });
-                setPreviewPageIndex(5);
-              }}
-            />
-          </Section>
-        </div>
-
-        {/* ——— 右：实时预览 ——— */}
-        <div className="lg:sticky lg:top-20 self-start">
-          <div className="rounded-2xl border border-black/5 bg-white shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/5 bg-neutral-50">
-              <div className="text-sm font-medium">实时预览</div>
-              <div className="flex gap-1">
-                {previewPages.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setPreviewPageIndex(i)}
-                    className={`px-2 py-0.5 text-[11px] rounded transition ${
-                      i === previewPageIndex
-                        ? 'bg-neutral-900 text-white'
-                        : 'bg-white text-neutral-600 border border-neutral-200 hover:border-neutral-400'
-                    }`}
-                  >
-                    {PREVIEW_TABS[i] ?? `第${i + 1}页`}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="p-4" style={{ background: draft.colors.bg }}>
-              <div className="mx-auto aspect-[3/4] max-w-[360px] w-full rounded-md overflow-hidden shadow-[0_20px_50px_-20px_rgba(0,0,0,0.35)]">
-                {previewPage && (
-                  <PageView
-                    page={previewPage}
-                    photos={SAMPLE_PHOTOS}
-                    template={draft}
-                    babyName="小满"
-                    dateRange="2024.03 – 2024.12"
-                  />
-                )}
-              </div>
-              <p className="text-center text-[11px] text-neutral-500 mt-3">
-                预览使用内置示例照片。真正用此模板创建画册时，会渲染你上传的照片。
-              </p>
-            </div>
+      {/* 底部：模板外观折叠面板 */}
+      <div className="mt-5">
+        <button
+          onClick={() => setShowAppearance((v) => !v)}
+          className="w-full text-left px-4 py-2.5 rounded-xl bg-white border border-black/5 shadow-sm flex items-center justify-between hover:bg-neutral-50"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">模板外观</span>
+            <span className="text-[11px] text-neutral-500">
+              · 配色 / 字体 / 背景 / 装饰（作用于整本模板）
+            </span>
           </div>
-        </div>
+          <span className="text-neutral-400">{showAppearance ? '▾' : '▸'}</span>
+        </button>
+        {showAppearance && (
+          <AppearancePanel
+            draft={draft}
+            update={update}
+            updateColors={updateColors}
+            updateFont={updateFont}
+          />
+        )}
       </div>
 
       {/* 局部样式：表单通用 */}
       <style>{`
-        .input {
+        .te-input {
           width: 100%;
-          padding: 8px 12px;
+          padding: 7px 10px;
           border-radius: 8px;
           border: 1px solid #e5e5e5;
           background: #fff;
-          font-size: 13px;
+          font-size: 12px;
           outline: none;
           transition: border-color .15s;
         }
-        .input:focus { border-color: #525252; }
-        textarea.input { line-height: 1.4; }
+        .te-input:focus { border-color: #525252; }
+        textarea.te-input { line-height: 1.4; }
       `}</style>
     </div>
   );
 }
 
-// —————————— 通用子组件 ——————————
+// —————————— 左：页列表 ——————————
+
+function PageListPanel({
+  draft,
+  pageIdx,
+  onSelect,
+  onAdd,
+  onDuplicate,
+  onDelete,
+  onMove,
+}: {
+  draft: UserTemplate;
+  pageIdx: number;
+  onSelect: (i: number) => void;
+  onAdd: () => void;
+  onDuplicate: (i: number) => void;
+  onDelete: (i: number) => void;
+  onMove: (i: number, delta: -1 | 1) => void;
+}) {
+  const pages = draft.pages ?? [];
+  return (
+    <aside className="rounded-2xl bg-white border border-black/5 shadow-sm p-2 flex flex-col gap-2 self-start sticky top-4 max-h-[calc(100vh-32px)] overflow-y-auto">
+      <div className="px-2 py-1 text-[11px] text-neutral-500 font-medium">
+        页面（{pages.length}）
+      </div>
+      <div className="space-y-1.5">
+        {pages.map((p, i) => {
+          const active = i === pageIdx;
+          return (
+            <div
+              key={p.id}
+              onClick={() => onSelect(i)}
+              className={`group relative rounded-lg border cursor-pointer overflow-hidden transition ${
+                active
+                  ? 'border-neutral-900 ring-2 ring-neutral-900/15 bg-white'
+                  : 'border-neutral-200 hover:border-neutral-400 bg-neutral-50'
+              }`}
+            >
+              {/* 缩略图 */}
+              <PageThumbnail page={p} draft={draft} />
+              {/* 序号 + 操作 */}
+              <div className="px-2 py-1 flex items-center justify-between text-[10px] bg-white/80 border-t border-neutral-100">
+                <span className={`font-medium ${active ? 'text-neutral-900' : 'text-neutral-500'}`}>
+                  P{i + 1}
+                </span>
+                <div className="flex gap-0.5">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMove(i, -1);
+                    }}
+                    disabled={i === 0}
+                    className="px-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
+                    title="上移"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMove(i, 1);
+                    }}
+                    disabled={i === pages.length - 1}
+                    className="px-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
+                    title="下移"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDuplicate(i);
+                    }}
+                    className="px-1 text-neutral-500 hover:text-neutral-900"
+                    title="复制此页"
+                  >
+                    ⎘
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(i);
+                    }}
+                    className="px-1 text-neutral-500 hover:text-rose-600"
+                    title="删除此页"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <button
+        onClick={onAdd}
+        className="mt-1 w-full py-2 rounded-lg border border-dashed border-neutral-300 text-[12px] text-neutral-600 hover:bg-neutral-50 hover:border-neutral-500"
+      >
+        ＋ 添加页
+      </button>
+    </aside>
+  );
+}
+
+/** 用 SVG 渲染页缩略图（按 overlays 的 % 坐标投到 60×80 上） */
+function PageThumbnail({ page, draft }: { page: TemplatePage; draft: UserTemplate }) {
+  const W = 60;
+  const H = 80;
+  return (
+    <div
+      style={{
+        width: '100%',
+        aspectRatio: '3 / 4',
+        background: page.background ?? draft.colors.paper,
+      }}
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%">
+        {page.overlays.map((o) => {
+          const x = (o.x / 100) * W;
+          const y = (o.y / 100) * H;
+          const w = (o.w / 100) * W;
+          const h = (o.h / 100) * H;
+          if (o.kind === 'photo') {
+            return (
+              <rect
+                key={o.id}
+                x={x}
+                y={y}
+                width={w}
+                height={h}
+                fill="#D4D4D4"
+                stroke="#A3A3A3"
+                strokeDasharray="2 2"
+                strokeWidth={0.5}
+                rx={o.shape === 'circle' ? Math.min(w, h) / 2 : 1.5}
+                transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
+              />
+            );
+          }
+          // text
+          return (
+            <g
+              key={o.id}
+              transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
+            >
+              <rect x={x} y={y} width={w} height={h} fill="rgba(0,0,0,0.04)" rx={1} />
+              <line
+                x1={x + 1}
+                y1={y + h / 2}
+                x2={x + w - 1}
+                y2={y + h / 2}
+                stroke="#737373"
+                strokeWidth={0.6}
+              />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// —————————— 中：画布 ——————————
+
+function CanvasArea({
+  draft,
+  page,
+  previewBound,
+  selectedOverlayId,
+  onSelectOverlay,
+  onOverlaysChange,
+}: {
+  draft: UserTemplate;
+  page: TemplatePage | undefined;
+  previewBound: boolean;
+  selectedOverlayId: string | null;
+  onSelectOverlay: (id: string | null) => void;
+  onOverlaysChange: (next: Overlay[]) => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  if (!page) {
+    return <div className="text-center text-neutral-500 py-20">没有页面</div>;
+  }
+
+  // 预览模式：把 placeholder 槽位临时绑到示例图，让用户看真实排版
+  const overlays: Overlay[] = previewBound
+    ? page.overlays.map((o, i) => {
+        if (o.kind !== 'photo' || !o.placeholder) return o;
+        const sample =
+          SAMPLE_PHOTOS[
+            page.overlays.slice(0, i + 1).filter((x) => x.kind === 'photo').length - 1
+          ] ?? SAMPLE_PHOTOS[0];
+        return { ...o, photoId: sample.id, placeholder: false };
+      })
+    : page.overlays;
+
+  // 同步把绑定后的 overlays 改回 onOverlaysChange 时要还原 placeholder（避免污染数据）
+  const handleChange = (next: Overlay[]) => {
+    if (!previewBound) {
+      onOverlaysChange(next);
+      return;
+    }
+    // 把示例图绑定还原成 placeholder
+    const restored = next.map((o, i) => {
+      if (o.kind !== 'photo') return o;
+      const orig = page.overlays[i];
+      if (orig && orig.kind === 'photo' && orig.placeholder) {
+        return { ...o, photoId: '', placeholder: true } as OverlayPhoto;
+      }
+      return o;
+    });
+    onOverlaysChange(restored);
+  };
+
+  const photos: Photo[] = previewBound ? SAMPLE_PHOTOS : [];
+
+  const bookPage: BookPage = {
+    ...pageToBookPage(page),
+    overlays,
+  };
+
+  return (
+    <div className="flex flex-col items-center" style={{ background: draft.colors.bg }}>
+      <div
+        ref={wrapRef}
+        className="rounded-md overflow-hidden shadow-[0_20px_50px_-20px_rgba(0,0,0,0.35)] bg-white"
+        style={{
+          width: '100%',
+          maxWidth: 540,
+          aspectRatio: '3 / 4',
+        }}
+        onClick={(e) => {
+          // 点击空白处取消选中
+          if (e.target === e.currentTarget) onSelectOverlay(null);
+        }}
+      >
+        <PageView
+          page={bookPage}
+          photos={photos}
+          template={draft}
+          babyName={draft.defaultTitle}
+          dateRange={draft.defaultSubtitle}
+          overlays={overlays}
+          selectedOverlayId={selectedOverlayId}
+          onSelectOverlay={onSelectOverlay}
+          onOverlaysChange={handleChange}
+        />
+      </div>
+      <p className="mt-3 text-[11px] text-neutral-500 text-center max-w-md">
+        点击元素选中，拖动主体改位置 · 边角缩放 · 顶部圆点旋转。点击空白取消选中。
+      </p>
+    </div>
+  );
+}
+
+// —————————— 右：工具 + 属性面板 ——————————
+
+function RightPanel({
+  draft,
+  page,
+  selectedOverlay,
+  onAddPhoto,
+  onAddText,
+  onPatchOverlay,
+  onRemoveOverlay,
+}: {
+  draft: UserTemplate;
+  page: TemplatePage | undefined;
+  selectedOverlay: Overlay | null;
+  onAddPhoto: () => void;
+  onAddText: (preset?: 'title' | 'subtitle' | 'caption') => void;
+  onPatchOverlay: (id: string, patch: Partial<Overlay>) => void;
+  onRemoveOverlay: (id: string) => void;
+}) {
+  return (
+    <aside className="space-y-3 self-start sticky top-4 max-h-[calc(100vh-32px)] overflow-y-auto pr-1">
+      {/* 工具栏 */}
+      <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+        <div className="text-[11px] text-neutral-500 mb-2 font-medium">添加元素</div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <ToolButton icon="🖼" label="图片框" onClick={onAddPhoto} />
+          <ToolButton icon="T" label="文字" onClick={() => onAddText()} />
+          <ToolButton icon="H1" label="标题" onClick={() => onAddText('title')} />
+          <ToolButton icon="H2" label="副标题" onClick={() => onAddText('subtitle')} />
+        </div>
+        <div className="mt-2 text-[10px] text-neutral-400 leading-relaxed">
+          图片框是"占位槽位"，用此模板创建画册时会按顺序填入用户上传的照片。
+        </div>
+        {page && (
+          <div className="mt-2 text-[11px] text-neutral-600 px-1">
+            当前页：{page.overlays.filter((o) => o.kind === 'photo').length} 个图片框 ·{' '}
+            {page.overlays.filter((o) => o.kind === 'text').length} 个文字
+          </div>
+        )}
+      </section>
+
+      {/* 属性面板 */}
+      <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+        <div className="text-[11px] text-neutral-500 mb-2 font-medium">
+          {selectedOverlay
+            ? selectedOverlay.kind === 'photo'
+              ? '图片框属性'
+              : '文字属性'
+            : '元素属性'}
+        </div>
+        {!selectedOverlay ? (
+          <div className="text-[11px] text-neutral-400 py-4 text-center">
+            点击画布中的元素以编辑属性
+          </div>
+        ) : selectedOverlay.kind === 'photo' ? (
+          <PhotoOverlayPanel
+            overlay={selectedOverlay}
+            draft={draft}
+            onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
+            onRemove={() => onRemoveOverlay(selectedOverlay.id)}
+          />
+        ) : (
+          <TextOverlayPanel
+            overlay={selectedOverlay}
+            draft={draft}
+            onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
+            onRemove={() => onRemoveOverlay(selectedOverlay.id)}
+          />
+        )}
+      </section>
+
+      {/* 几何（通用） */}
+      {selectedOverlay && (
+        <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+          <div className="text-[11px] text-neutral-500 mb-2 font-medium">位置 & 旋转</div>
+          <GeometryPanel
+            overlay={selectedOverlay}
+            onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
+          />
+        </section>
+      )}
+    </aside>
+  );
+}
+
+function ToolButton({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center justify-center gap-1 py-2.5 rounded-lg border border-neutral-200 hover:border-neutral-900 hover:bg-neutral-50 text-[11px] text-neutral-700 transition"
+    >
+      <span className="text-[15px] font-bold">{icon}</span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function PhotoOverlayPanel({
+  overlay,
+  draft,
+  onPatch,
+  onRemove,
+}: {
+  overlay: OverlayPhoto;
+  draft: UserTemplate;
+  onPatch: (patch: Partial<Overlay>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div>
+        <div className="text-[10px] text-neutral-500 mb-1">相框形状</div>
+        <div className="grid grid-cols-3 gap-1">
+          {PHOTO_SHAPES.map((s) => {
+            const active = (overlay.shape ?? 'rect') === s.key;
+            return (
+              <button
+                key={s.key}
+                onClick={() => onPatch({ shape: s.key })}
+                className={`py-1 rounded text-[10px] border transition ${
+                  active
+                    ? 'border-neutral-900 bg-neutral-900 text-white'
+                    : 'border-neutral-200 bg-white hover:border-neutral-400'
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] text-neutral-500 mb-1">边框</div>
+        <div className="flex items-center gap-1.5">
+          <input
+            type="color"
+            value={normalizeHex(overlay.borderColor ?? draft.colors.paper)}
+            onChange={(e) => onPatch({ borderColor: e.target.value })}
+            className="w-7 h-7 rounded border border-neutral-200"
+            style={{ padding: 0 }}
+          />
+          <input
+            type="number"
+            min={0}
+            max={20}
+            value={overlay.borderWidth ?? 4}
+            onChange={(e) => onPatch({ borderWidth: Math.max(0, Number(e.target.value)) })}
+            className="te-input flex-1"
+            placeholder="px"
+          />
+        </div>
+      </div>
+
+      <button
+        onClick={onRemove}
+        className="w-full py-1.5 rounded-md text-rose-600 text-[11px] border border-rose-200 hover:bg-rose-50"
+      >
+        删除该图片框
+      </button>
+    </div>
+  );
+}
+
+function TextOverlayPanel({
+  overlay,
+  draft,
+  onPatch,
+  onRemove,
+}: {
+  overlay: OverlayText;
+  draft: UserTemplate;
+  onPatch: (patch: Partial<Overlay>) => void;
+  onRemove: () => void;
+}) {
+  const FONT_OPTIONS = [...FONT_TITLE_OPTIONS, ...FONT_BODY_OPTIONS];
+  return (
+    <div className="space-y-2.5">
+      <div>
+        <div className="text-[10px] text-neutral-500 mb-1">文字内容</div>
+        <textarea
+          value={overlay.text}
+          onChange={(e) => onPatch({ text: e.target.value })}
+          className="te-input"
+          rows={2}
+          maxLength={200}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">字号 (px)</div>
+          <input
+            type="number"
+            min={8}
+            max={120}
+            value={overlay.fontSize ?? 22}
+            onChange={(e) => onPatch({ fontSize: Math.max(8, Number(e.target.value)) })}
+            className="te-input"
+          />
+        </div>
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">颜色</div>
+          <input
+            type="color"
+            value={normalizeHex(overlay.color ?? draft.colors.text)}
+            onChange={(e) => onPatch({ color: e.target.value })}
+            className="w-full h-[30px] rounded border border-neutral-200 p-0"
+          />
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] text-neutral-500 mb-1">字体</div>
+        <select
+          value={overlay.fontFamily ?? draft.fontFamily.body}
+          onChange={(e) => onPatch({ fontFamily: e.target.value })}
+          className="te-input"
+          style={{ fontFamily: overlay.fontFamily }}
+        >
+          {FONT_OPTIONS.map((f) => (
+            <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">对齐</div>
+          <div className="flex gap-1">
+            {(['left', 'center', 'right'] as const).map((a) => {
+              const active = (overlay.align ?? 'center') === a;
+              return (
+                <button
+                  key={a}
+                  onClick={() => onPatch({ align: a })}
+                  className={`flex-1 py-1 rounded text-[10px] border transition ${
+                    active
+                      ? 'border-neutral-900 bg-neutral-900 text-white'
+                      : 'border-neutral-200 hover:border-neutral-400'
+                  }`}
+                >
+                  {a === 'left' ? '左' : a === 'right' ? '右' : '中'}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">样式</div>
+          <div className="flex gap-1">
+            <button
+              onClick={() => onPatch({ bold: !overlay.bold })}
+              className={`flex-1 py-1 rounded text-[10px] border font-bold ${
+                overlay.bold
+                  ? 'border-neutral-900 bg-neutral-900 text-white'
+                  : 'border-neutral-200'
+              }`}
+            >
+              B
+            </button>
+            <button
+              onClick={() => onPatch({ italic: !overlay.italic })}
+              className={`flex-1 py-1 rounded text-[10px] border italic ${
+                overlay.italic
+                  ? 'border-neutral-900 bg-neutral-900 text-white'
+                  : 'border-neutral-200'
+              }`}
+            >
+              I
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={onRemove}
+        className="w-full py-1.5 rounded-md text-rose-600 text-[11px] border border-rose-200 hover:bg-rose-50"
+      >
+        删除该文字
+      </button>
+    </div>
+  );
+}
+
+function GeometryPanel({
+  overlay,
+  onPatch,
+}: {
+  overlay: Overlay;
+  onPatch: (patch: Partial<Overlay>) => void;
+}) {
+  const NumField = ({
+    label,
+    value,
+    onChange,
+    min = 0,
+    max = 100,
+  }: {
+    label: string;
+    value: number;
+    onChange: (v: number) => void;
+    min?: number;
+    max?: number;
+  }) => (
+    <div>
+      <div className="text-[10px] text-neutral-500 mb-0.5">{label}</div>
+      <input
+        type="number"
+        value={Number(value.toFixed(1))}
+        min={min}
+        max={max}
+        step={0.5}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="te-input"
+      />
+    </div>
+  );
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <NumField label="X (%)" value={overlay.x} onChange={(v) => onPatch({ x: v })} />
+        <NumField label="Y (%)" value={overlay.y} onChange={(v) => onPatch({ y: v })} />
+        <NumField label="宽 (%)" value={overlay.w} onChange={(v) => onPatch({ w: v })} min={1} />
+        <NumField label="高 (%)" value={overlay.h} onChange={(v) => onPatch({ h: v })} min={1} />
+      </div>
+      <div>
+        <div className="text-[10px] text-neutral-500 mb-1">
+          旋转 {Math.round(overlay.rotation ?? 0)}°
+        </div>
+        <input
+          type="range"
+          min={-180}
+          max={180}
+          value={overlay.rotation ?? 0}
+          onChange={(e) => onPatch({ rotation: Number(e.target.value) })}
+          className="w-full"
+        />
+      </div>
+    </div>
+  );
+}
+
+// —————————— 模板外观折叠面板 ——————————
+
+function AppearancePanel({
+  draft,
+  update,
+  updateColors,
+  updateFont,
+}: {
+  draft: UserTemplate;
+  update: (patch: Partial<UserTemplate>) => void;
+  updateColors: (patch: Partial<Template['colors']>) => void;
+  updateFont: (patch: Partial<Template['fontFamily']>) => void;
+}) {
+  const handleApplyBgPreset = (make: (c1: string, c2: string) => string) => {
+    const c1 = withAlpha(draft.colors.primary, 0.18);
+    const c2 = withAlpha(draft.colors.accent, 0.18);
+    update({ backgroundPattern: make(c1, c2) });
+  };
+
+  return (
+    <div className="mt-3 grid md:grid-cols-2 gap-4">
+      <Section title="基础信息">
+        <Field label="模板描述">
+          <input
+            type="text"
+            value={draft.description}
+            onChange={(e) => update({ description: e.target.value })}
+            className="te-input"
+            maxLength={50}
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="分类">
+            <select
+              value={draft.category}
+              onChange={(e) =>
+                update({ category: e.target.value as TemplateCategory })
+              }
+              className="te-input"
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="风格骨架">
+            <select
+              value={draft.style}
+              onChange={(e) => update({ style: e.target.value as TemplateStyle })}
+              className="te-input"
+              title={STYLE_OPTIONS.find((s) => s.key === draft.style)?.hint}
+            >
+              {STYLE_OPTIONS.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="默认标题">
+            <input
+              type="text"
+              value={draft.defaultTitle}
+              onChange={(e) => update({ defaultTitle: e.target.value })}
+              className="te-input"
+              maxLength={16}
+            />
+          </Field>
+          <Field label="默认副标题">
+            <input
+              type="text"
+              value={draft.defaultSubtitle}
+              onChange={(e) => update({ defaultSubtitle: e.target.value })}
+              className="te-input"
+              maxLength={20}
+            />
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="配色">
+        <div className="grid grid-cols-5 gap-1.5">
+          {(
+            [
+              ['bg', '页底'],
+              ['paper', '纸张'],
+              ['primary', '主色'],
+              ['accent', '强调'],
+              ['text', '文字'],
+            ] as const
+          ).map(([k, label]) => (
+            <ColorField
+              key={k}
+              label={label}
+              value={draft.colors[k]}
+              onChange={(v) => updateColors({ [k]: v } as Partial<Template['colors']>)}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="字体">
+        <Field label="标题字体">
+          <select
+            value={draft.fontFamily.title}
+            onChange={(e) => updateFont({ title: e.target.value })}
+            className="te-input"
+            style={{ fontFamily: draft.fontFamily.title }}
+          >
+            {FONT_TITLE_OPTIONS.map((f) => (
+              <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="正文字体">
+          <select
+            value={draft.fontFamily.body}
+            onChange={(e) => updateFont({ body: e.target.value })}
+            className="te-input"
+            style={{ fontFamily: draft.fontFamily.body }}
+          >
+            {FONT_BODY_OPTIONS.map((f) => (
+              <option key={f.value} value={f.value} style={{ fontFamily: f.value }}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </Section>
+
+      <Section title="背景底纹 & 装饰">
+        <div className="grid grid-cols-3 gap-1.5 mb-2">
+          {BG_PRESETS.map((p) => {
+            const c1 = withAlpha(draft.colors.primary, 0.18);
+            const c2 = withAlpha(draft.colors.accent, 0.18);
+            const css = p.make(c1, c2);
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => handleApplyBgPreset(p.make)}
+                className="rounded-md border border-neutral-200 hover:border-neutral-400 overflow-hidden text-left"
+              >
+                <div
+                  className="h-10"
+                  style={{
+                    background: css ? `${css}, ${draft.colors.paper}` : draft.colors.paper,
+                  }}
+                />
+                <div className="text-[10px] px-1.5 py-0.5">{p.label}</div>
+              </button>
+            );
+          })}
+        </div>
+        <Field label="装饰元素（逗号分隔，最多 6 个）">
+          <input
+            type="text"
+            value={draft.decorations.join(',')}
+            onChange={(e) =>
+              update({
+                decorations: e.target.value
+                  .split(/[,，]/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .slice(0, 6),
+              })
+            }
+            placeholder="🌸,🍃,✿"
+            className="te-input"
+          />
+        </Field>
+      </Section>
+    </div>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-4">
-      <h2 className="text-sm font-semibold mb-3 text-neutral-800">{title}</h2>
-      <div className="space-y-3">{children}</div>
+    <section className="rounded-xl bg-white border border-black/5 shadow-sm p-3">
+      <h3 className="text-xs font-semibold mb-2 text-neutral-800">{title}</h3>
+      <div className="space-y-2">{children}</div>
     </section>
   );
 }
@@ -696,7 +1391,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <div className="text-[11px] text-neutral-500 mb-1">{label}</div>
+      <div className="text-[10px] text-neutral-500 mb-1">{label}</div>
       {children}
     </label>
   );
@@ -704,343 +1399,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ColorField({
   label,
-  hint,
   value,
   onChange,
 }: {
   label: string;
-  hint: string;
   value: string;
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex flex-col">
-      <div className="text-[11px] text-neutral-600 font-medium">{label}</div>
-      <div className="text-[10px] text-neutral-400 mb-1.5">{hint}</div>
-      <div className="flex items-center gap-2 p-1.5 rounded-lg border border-neutral-200 bg-white">
-        <input
-          type="color"
-          value={normalizeHex(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-7 h-7 rounded cursor-pointer border border-neutral-200"
-          style={{ padding: 0 }}
-        />
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="flex-1 min-w-0 bg-transparent text-[11px] font-mono outline-none"
-        />
-      </div>
-    </div>
-  );
-}
-
-/** color input 只接受 #rrggbb，非法时返回黑色，避免控件报错 */
-function normalizeHex(v: string): string {
-  if (/^#[0-9a-f]{6}$/i.test(v)) return v;
-  if (/^#[0-9a-f]{3}$/i.test(v)) {
-    const h = v.slice(1);
-    return '#' + h.split('').map((c) => c + c).join('');
-  }
-  return '#000000';
-}
-
-// —————————— 版式方案挑选器 ——————————
-
-function VariantPicker({
-  title,
-  tabIndex,
-  variants,
-  value,
-  onChange,
-}: {
-  title: string;
-  /** 对应右侧预览 tab 的序号，用于点击时联动预览 */
-  tabIndex: number;
-  variants: { id: string; label: string; hint: string }[];
-  value: string;
-  onChange: (id: string) => void;
-}) {
-  return (
-    <div>
-      <div className="text-[11px] text-neutral-600 font-medium mb-1.5">
-        {title}
-        <span className="ml-2 text-[10px] text-neutral-400">选一种排版</span>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {variants.map((v) => {
-          const selected = v.id === value;
-          return (
-            <button
-              key={v.id}
-              type="button"
-              title={v.hint}
-              onClick={() => onChange(v.id)}
-              className={`text-left rounded-lg border overflow-hidden transition ${
-                selected
-                  ? 'border-neutral-900 ring-2 ring-neutral-900/10'
-                  : 'border-neutral-200 hover:border-neutral-400'
-              }`}
-            >
-              <div className="bg-neutral-50 border-b border-neutral-100">
-                <VariantThumb layout={tabIndexToLayout(tabIndex)} variantId={v.id} />
-              </div>
-              <div className="px-2 py-1.5">
-                <div className="text-[11px] font-medium leading-tight">{v.label}</div>
-                <div className="text-[10px] text-neutral-500 leading-tight mt-0.5">
-                  {v.hint}
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-type VariantLayoutKey = 'double' | 'triple' | 'grid4' | 'grid5' | 'grid6';
-
-function tabIndexToLayout(tabIndex: number): VariantLayoutKey {
-  // 预览 tab: 0=封面, 1=双图, 2=三图, 3=四图, 4=五图, 5=六图
-  const map: Record<number, VariantLayoutKey> = {
-    1: 'double',
-    2: 'triple',
-    3: 'grid4',
-    4: 'grid5',
-    5: 'grid6',
-  };
-  return map[tabIndex] ?? 'double';
-}
-
-/**
- * 版式变体的小缩略图（纯 SVG 抽象矩形 + 尺寸/位置比例与 PageView 真实骨架保持一致）
- * 宽高比 3:4，跟页面预览保持一致
- */
-function VariantThumb({
-  layout,
-  variantId,
-}: {
-  layout: VariantLayoutKey;
-  variantId: string;
-}) {
-  // 画布 90×120，内缩 8px，作为相纸
-  const W = 90;
-  const H = 120;
-  const P = 8;
-  const inner = { x: P, y: P, w: W - P * 2, h: H - P * 2 };
-  const rects = getVariantRects(layout, variantId, inner);
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="block">
-      <rect x={0} y={0} width={W} height={H} fill="#FAFAFA" />
-      <rect
-        x={inner.x}
-        y={inner.y}
-        width={inner.w}
-        height={inner.h}
-        fill="#FFFFFF"
-        stroke="#E5E5E5"
+    <div className="flex flex-col items-center">
+      <div className="text-[9px] text-neutral-500 mb-0.5">{label}</div>
+      <input
+        type="color"
+        value={normalizeHex(value)}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full h-8 rounded border border-neutral-200 cursor-pointer"
+        style={{ padding: 0 }}
       />
-      {rects.map((r, i) => (
-        <g key={i} transform={r.rotate ? `rotate(${r.rotate} ${r.x + r.w / 2} ${r.y + r.h / 2})` : undefined}>
-          <rect
-            x={r.x}
-            y={r.y}
-            width={r.w}
-            height={r.h}
-            fill="#D9D9D9"
-            stroke="#A3A3A3"
-            strokeWidth={0.6}
-            rx={1.5}
-          />
-        </g>
-      ))}
-    </svg>
+    </div>
   );
-}
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  rotate?: number;
-}
-
-function getVariantRects(
-  layout: VariantLayoutKey,
-  variantId: string,
-  box: { x: number; y: number; w: number; h: number },
-): Rect[] {
-  // 为了避免缩略图贴边，总体再 padding 2
-  const pad = 2;
-  const x0 = box.x + pad;
-  const y0 = box.y + pad;
-  const w = box.w - pad * 2;
-  const h = box.h - pad * 2;
-  const gap = 2;
-
-  if (layout === 'double') {
-    if (variantId === 'big-small') {
-      const leftW = w * 0.62;
-      const rightW = w - leftW - gap;
-      return [
-        { x: x0, y: y0 + h * 0.1, w: leftW, h: h * 0.8 },
-        { x: x0 + leftW + gap, y: y0 + h * 0.3, w: rightW, h: rightW },
-      ];
-    }
-    if (variantId === 'stack-overlap') {
-      const s = w * 0.56;
-      return [
-        { x: x0, y: y0 + 2, w: s, h: s, rotate: -6 },
-        { x: x0 + w - s, y: y0 + h - s - 2, w: s, h: s, rotate: 6 },
-      ];
-    }
-    // equal
-    const half = (w - gap) / 2;
-    return [
-      { x: x0, y: y0 + (h - half) / 2, w: half, h: half },
-      { x: x0 + half + gap, y: y0 + (h - half) / 2, w: half, h: half },
-    ];
-  }
-
-  if (layout === 'triple') {
-    if (variantId === 'row') {
-      const third = (w - gap * 2) / 3;
-      const rh = third * 1.25;
-      return [0, 1, 2].map((i) => ({
-        x: x0 + i * (third + gap),
-        y: y0 + (h - rh) / 2,
-        w: third,
-        h: rh,
-      }));
-    }
-    if (variantId === 'scatter') {
-      return [
-        { x: x0, y: y0, w: w * 0.5, h: h * 0.55, rotate: -6 },
-        { x: x0 + w * 0.5, y: y0 + h * 0.08, w: w * 0.42, h: w * 0.42, rotate: 6 },
-        { x: x0 + w * 0.22, y: y0 + h * 0.5, w: w * 0.5, h: w * 0.5, rotate: -4 },
-      ];
-    }
-    // big-two
-    const mainW = w * 0.58;
-    const rightW = w - mainW - gap;
-    const miniH = (h - gap) / 2;
-    return [
-      { x: x0, y: y0, w: mainW, h: h },
-      { x: x0 + mainW + gap, y: y0, w: rightW, h: miniH },
-      { x: x0 + mainW + gap, y: y0 + miniH + gap, w: rightW, h: miniH },
-    ];
-  }
-
-  if (layout === 'grid4') {
-    if (variantId === 'scatter') {
-      const s = w * 0.44;
-      return [
-        { x: x0, y: y0, w: s, h: s, rotate: -5 },
-        { x: x0 + w - s, y: y0 + 3, w: s, h: s * 1.15, rotate: 4 },
-        { x: x0 + 4, y: y0 + h - s, w: s, h: s * 1.1, rotate: -3 },
-        { x: x0 + w - s, y: y0 + h - s, w: s, h: s, rotate: 5 },
-      ];
-    }
-    if (variantId === 'hero-right') {
-      const leftW = w * 0.38;
-      const rightW = w - leftW - gap;
-      const miniH = (h - gap * 2) / 3;
-      return [
-        { x: x0, y: y0, w: leftW, h: miniH },
-        { x: x0, y: y0 + miniH + gap, w: leftW, h: miniH },
-        { x: x0, y: y0 + (miniH + gap) * 2, w: leftW, h: miniH },
-        { x: x0 + leftW + gap, y: y0, w: rightW, h: h },
-      ];
-    }
-    // 2x2
-    const cw = (w - gap) / 2;
-    const ch = (h - gap) / 2;
-    return [
-      { x: x0, y: y0, w: cw, h: ch },
-      { x: x0 + cw + gap, y: y0, w: cw, h: ch },
-      { x: x0, y: y0 + ch + gap, w: cw, h: ch },
-      { x: x0 + cw + gap, y: y0 + ch + gap, w: cw, h: ch },
-    ];
-  }
-
-  if (layout === 'grid5') {
-    if (variantId === 'hero-center') {
-      const s = w * 0.5;
-      const corner = w * 0.22;
-      return [
-        { x: x0 + (w - s) / 2, y: y0 + (h - s) / 2, w: s, h: s },
-        { x: x0, y: y0, w: corner, h: corner },
-        { x: x0 + w - corner, y: y0, w: corner, h: corner },
-        { x: x0, y: y0 + h - corner, w: corner, h: corner },
-        { x: x0 + w - corner, y: y0 + h - corner, w: corner, h: corner },
-      ];
-    }
-    if (variantId === 'top1-bottom4') {
-      const topH = h * 0.5;
-      const bw = (w - gap * 3) / 4;
-      return [
-        { x: x0, y: y0, w: w, h: topH - gap },
-        ...Array.from({ length: 4 }).map((_, i) => ({
-          x: x0 + i * (bw + gap),
-          y: y0 + topH,
-          w: bw,
-          h: h - topH,
-        })),
-      ];
-    }
-    // hero-left
-    const leftW = w * 0.58;
-    const rightW = w - leftW - gap;
-    const cw = (rightW - gap) / 2;
-    const ch = (h - gap) / 2;
-    return [
-      { x: x0, y: y0, w: leftW, h: h },
-      { x: x0 + leftW + gap, y: y0, w: cw, h: ch },
-      { x: x0 + leftW + gap + cw + gap, y: y0, w: cw, h: ch },
-      { x: x0 + leftW + gap, y: y0 + ch + gap, w: cw, h: ch },
-      { x: x0 + leftW + gap + cw + gap, y: y0 + ch + gap, w: cw, h: ch },
-    ];
-  }
-
-  // grid6
-  if (variantId === 'hero-left-5') {
-    const leftW = w * 0.56;
-    const rightW = w - leftW - gap;
-    const rh = (h - gap * 4) / 5;
-    return [
-      { x: x0, y: y0, w: leftW, h: h },
-      ...Array.from({ length: 5 }).map((_, i) => ({
-        x: x0 + leftW + gap,
-        y: y0 + i * (rh + gap),
-        w: rightW,
-        h: rh,
-      })),
-    ];
-  }
-  if (variantId === 'mosaic') {
-    const big = w * 0.44;
-    const small = w * 0.22;
-    return [
-      { x: x0, y: y0, w: big, h: big * 1.25 },
-      { x: x0 + w - big, y: y0 + h - big * 1.25, w: big, h: big * 1.25 },
-      { x: x0 + w - small, y: y0, w: small, h: small },
-      { x: x0 + w - small - small - gap, y: y0 + small + 2, w: small, h: small },
-      { x: x0, y: y0 + h - small - small - gap, w: small, h: small },
-      { x: x0 + small + gap, y: y0 + h - small, w: small, h: small },
-    ];
-  }
-  // grid-3x2
-  const cw = (w - gap * 2) / 3;
-  const ch = (h - gap) / 2;
-  const rects: Rect[] = [];
-  for (let r = 0; r < 2; r++) {
-    for (let c = 0; c < 3; c++) {
-      rects.push({ x: x0 + c * (cw + gap), y: y0 + r * (ch + gap), w: cw, h: ch });
-    }
-  }
-  return rects;
 }

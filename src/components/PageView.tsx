@@ -338,7 +338,12 @@ function PageViewInner({ page, photos, template, babyName, dateRange, width, hei
    *   保证任何情况都不会出现"纯空白页"。
    */
   const resolvedLayout: BookPage['layout'] = (() => {
-    if (page.layout === 'cover' || page.layout === 'text' || page.layout === 'ending') {
+    if (
+      page.layout === 'cover' ||
+      page.layout === 'text' ||
+      page.layout === 'ending' ||
+      page.layout === 'free'
+    ) {
       return page.layout;
     }
     const n = pagePhotos.length;
@@ -4384,7 +4389,12 @@ function OverlayLayer({
         zIndex: 5,
       }}
     >
-      {displayOverlays.map((ov) => {
+      {displayOverlays.map((ov, idx) => {
+        // 该 photo overlay 在所有 photo overlays 中的序号（1 起）；用于模板编辑器中渲染槽位编号
+        const photoSlotIdx =
+          ov.kind === 'photo'
+            ? displayOverlays.slice(0, idx + 1).filter((o) => o.kind === 'photo').length
+            : undefined;
         const selected = editable && ov.id === selectedOverlayId;
         const baseStyle: CSSProperties = {
           position: 'absolute',
@@ -4413,7 +4423,7 @@ function OverlayLayer({
             onPointerDown={(e) => startMove(e, ov)}
           >
             {ov.kind === 'photo' ? (
-              <OverlayPhotoBody overlay={ov} photo={photoMap.get(ov.photoId)} template={template} photoFrameColor={photoFrameColor} />
+              <OverlayPhotoBody overlay={ov} photo={photoMap.get(ov.photoId)} template={template} photoFrameColor={photoFrameColor} placeholderIndex={photoSlotIdx} />
             ) : (
               <OverlayTextBody overlay={ov} />
             )}
@@ -4536,20 +4546,39 @@ function OverlayPhotoBody({
   photo,
   template,
   photoFrameColor,
+  placeholderIndex,
 }: {
   overlay: OverlayPhoto;
   photo?: Photo;
   template: Template;
   photoFrameColor: string | null;
+  /** 模板编辑器中传入的"槽位编号"（1 起），用于渲染占位上的"#1/#2..." */
+  placeholderIndex?: number;
 }) {
-  if (!photo) {
-    // 引用的照片已被删除：渲染占位提示，避免静默丢失
+  // 模板编辑器中的占位 / 引用的照片已被删除 → 渲染中性占位
+  if (overlay.placeholder || !photo) {
+    const isTemplateSlot = !!overlay.placeholder;
     return (
       <div
-        className="w-full h-full flex items-center justify-center text-[10px] text-rose-500/80"
-        style={{ background: 'rgba(255,228,230,0.6)', border: '1px dashed #fb7185' }}
+        className="w-full h-full flex flex-col items-center justify-center select-none"
+        style={{
+          background: isTemplateSlot
+            ? 'repeating-linear-gradient(135deg, #f5f5f5 0 8px, #ececec 8px 16px)'
+            : 'rgba(255,228,230,0.6)',
+          border: isTemplateSlot ? '1.5px dashed #a3a3a3' : '1px dashed #fb7185',
+          borderRadius: overlay.shape === 'circle' ? '50%' : 8,
+          color: isTemplateSlot ? '#737373' : '#e11d48',
+          pointerEvents: 'none',
+        }}
       >
-        图片已删除
+        <div style={{ fontSize: '22%', lineHeight: 1 }}>{isTemplateSlot ? '🖼' : '⚠'}</div>
+        <div style={{ fontSize: '11%', marginTop: 2, fontWeight: 500 }}>
+          {isTemplateSlot
+            ? placeholderIndex
+              ? `图片槽位 #${placeholderIndex}`
+              : '图片槽位'
+            : '图片已删除'}
+        </div>
       </div>
     );
   }

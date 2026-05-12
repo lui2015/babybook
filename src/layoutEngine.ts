@@ -1,4 +1,11 @@
-import type { BookPage, Photo, PageLayoutType, Template } from './types';
+import type {
+  BookPage,
+  Overlay,
+  OverlayPhoto,
+  Photo,
+  PageLayoutType,
+  Template,
+} from './types';
 
 /**
  * 智能排版引擎
@@ -119,6 +126,13 @@ const CAPTIONS = [
 export function generatePages(photos: Photo[], options: LayoutOptions = {}): BookPage[] {
   if (photos.length === 0) return [];
 
+  // 优先级：模板带自由布局页（template.pages） → 直接按模板页结构实例化
+  // 这是「自定义模板编辑器」生成的模板的渲染入口。
+  const tplPages = options.template?.pages;
+  if (tplPages && tplPages.length > 0) {
+    return instantiateFromTemplatePages(photos, options);
+  }
+
   const pages: BookPage[] = [];
   const tpl = options.template;
 
@@ -166,4 +180,71 @@ export function generatePages(photos: Photo[], options: LayoutOptions = {}): Boo
   });
 
   return pages;
+}
+
+/**
+ * 按模板的自由布局页（template.pages）实例化画册。
+ *
+ * 规则：
+ *  - 完全保留模板预设的页数和每页的 overlays 几何布局；
+ *  - 把所有页中的 OverlayPhoto 槽位（按页顺序、再按 overlays 顺序）依次绑定用户照片；
+ *  - 当用户照片数 < 槽位数时，剩余槽位保留为 placeholder（PageView 会渲染占位）；
+ *  - 当用户照片数 > 槽位数时，多余照片会循环回填首页槽位（避免照片被丢弃）。
+ *
+ * 文字 overlay 原样保留（用模板里设计的文案）。
+ */
+function instantiateFromTemplatePages(
+  photos: Photo[],
+  options: LayoutOptions,
+): BookPage[] {
+  const tpl = options.template!;
+  const tplPages = tpl.pages!;
+
+  // 计算所有 photo 槽位数
+  const totalSlots = tplPages.reduce(
+    (sum, p) => sum + p.overlays.filter((o) => o.kind === 'photo').length,
+    0,
+  );
+
+  // 给每个槽位顺序绑一张照片
+  const photoIdsBySlot: string[] = [];
+  for (let i = 0; i < totalSlots; i++) {
+    photoIdsBySlot.push(photos[i % photos.length].id);
+  }
+
+  // 替换封面页第一张图片为"用户标记的封面"（如果有），让封面更智能
+  const cover = pickCover(photos);
+  if (totalSlots > 0) photoIdsBySlot[0] = cover.id;
+
+  let slotCursor = 0;
+  return tplPages.map((tp, pageIdx) => {
+    const pagePhotoIds: string[] = [];
+    const overlays: Overlay[] = tp.overlays.map((ov) => {
+      if (ov.kind !== 'photo') return ov;
+      const boundPhotoId = photoIdsBySlot[slotCursor] ?? photos[0].id;
+      slotCursor += 1;
+      pagePhotoIds.push(boundPhotoId);
+      const filled: OverlayPhoto = {
+        ...ov,
+        photoId: boundPhotoId,
+        placeholder: false,
+      };
+      return filled;
+    });
+
+    return {
+      id: uid(),
+      layout: 'free',
+      photoIds: pagePhotoIds,
+      // 仅首页用模板默认标题/副标题作为 BookPage 级字段（导出/分享时可读取）
+      ...(pageIdx === 0
+        ? {
+            title:
+              tpl.defaultTitle ?? (options.babyName ? `${options.babyName}的画册` : '我的画册'),
+            subtitle: options.dateRange || tpl.defaultSubtitle || '',
+          }
+        : {}),
+      overlays,
+    };
+  });
 }

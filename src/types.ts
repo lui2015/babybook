@@ -49,7 +49,12 @@ export type PageLayoutType =
   | 'grid5'
   | 'grid6'
   | 'text'
-  | 'ending';
+  | 'ending'
+  /**
+   * 自由版式：页面无任何预设骨架，所有内容（照片框 / 文字）都通过 overlays 自由摆放。
+   * 由「自定义模板编辑器」生成的 TemplatePage 默认使用此 layout。
+   */
+  | 'free';
 
 /**
  * 多图版式的骨架变体 id
@@ -104,6 +109,33 @@ export interface Template {
    * 仅作用于用户"自定义模板"；内置模板可以不填，保持向后兼容。
    */
   layoutVariants?: LayoutVariants;
+  /**
+   * 模板自定义页（自由布局）。
+   * - 由「自定义模板编辑器」生成的页列表，每页都是 layout='free' + overlays 自由摆放。
+   * - 创建画册时按此列表逐页实例化 BookPage（OverlayPhoto.photoId 会被替换为用户实际上传的照片 id）。
+   * - 缺省 / 空数组 → 走旧的 layoutVariants 逻辑（兼容老数据）。
+   */
+  pages?: TemplatePage[];
+}
+
+/**
+ * 自定义模板中的一页：固定 free 版式 + overlays。
+ * 与 BookPage 的关系：BookPage 的 layout='free' 时会读取 page.overlays 直接渲染。
+ * TemplatePage.overlays 中：
+ *   - OverlayPhoto.photoId 在模板里仅作为"占位/绑定槽位编号"——用户用此模板创建画册时，
+ *     编辑器会按 overlays 中 OverlayPhoto 的顺序，把用户上传的照片依次填入。
+ *   - OverlayPhoto.placeholder=true 表示该槽位在模板里还没绑定真实照片，
+ *     模板编辑器会渲染为灰底相框。
+ */
+export interface TemplatePage {
+  /** 模板内页 id（稳定标识，用于排序/编辑） */
+  id: string;
+  /** 该页所需的最少照片数；由 overlays 中 OverlayPhoto 的数量自动决定 */
+  photoSlotCount: number;
+  /** 自由摆放的所有元素（照片框 + 文字块） */
+  overlays: Overlay[];
+  /** 该页特定的背景颜色覆盖（可选；不填用模板 paper 色） */
+  background?: string | null;
 }
 
 /**
@@ -190,6 +222,14 @@ export interface OverlayPhoto extends OverlayBase {
   borderColor?: string | null;
   /** 边框宽度（px），不填用 4px */
   borderWidth?: number;
+  /**
+   * 占位标记：仅出现在「模板编辑器」中。
+   * - true：该 OverlayPhoto 是模板里设计的"图片槽位"，photoId 还未绑定真实照片，
+   *   PageView 渲染时会显示为灰底相框 + 占位图标。
+   * - 创建画册时，编辑器会按 overlays 顺序把 photoId 替换为用户上传的真实照片，
+   *   并清掉本字段。
+   */
+  placeholder?: boolean;
 }
 
 export interface OverlayText extends OverlayBase {
