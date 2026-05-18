@@ -61,6 +61,21 @@ export function BookEditorPage() {
   // 左下「新增页面」弹出版式选择
   const [addPagePickerOpen, setAddPagePickerOpen] = useState(false);
 
+  // 编辑器需要较大的屏幕（三栏布局 + 鼠标精细操作），
+  // 在窄屏给出"建议使用大屏"的友好提示；用户确认后仍可继续
+  const [forceNarrow, setForceNarrow] = useState(false);
+  const [isNarrow, setIsNarrow] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 1024;
+  });
+  useEffect(() => {
+    function onResize() {
+      setIsNarrow(window.innerWidth < 1024);
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // —— 左侧页面列表拖拽排序状态 ——
   // dragFromIdx：正在被拖的那一页；null 表示没有拖拽中
   // dragOverIdx：当前鼠标悬停的"插入位"。语义：把被拖页插到这个位置之前；
@@ -552,6 +567,36 @@ export function BookEditorPage() {
     });
   }
 
+  if (isNarrow && !forceNarrow) {
+    return (
+      <div className="min-h-[calc(100vh-56px)] bg-neutral-50 px-5 py-10 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-soft border border-neutral-200 p-6 text-center">
+          <div className="text-4xl mb-3">🖥️</div>
+          <h1 className="font-display text-xl font-bold mb-2">建议在大屏上编辑</h1>
+          <p className="text-sm text-neutral-600 leading-relaxed mb-5">
+            画册编辑器需要拖拽、对位与精细操作，在小屏体验欠佳。
+            <br />
+            建议使用 iPad 横屏 / 平板 / 电脑打开本页面进行编辑。
+          </p>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={backToDetail}
+              className="w-full py-2.5 rounded-full bg-rose text-white text-sm font-medium hover:bg-rose-dark transition"
+            >
+              返回画册详情
+            </button>
+            <button
+              onClick={() => setForceNarrow(true)}
+              className="w-full py-2.5 rounded-full border border-neutral-300 text-neutral-600 text-sm hover:border-neutral-500 transition"
+            >
+              我了解，仍在小屏继续
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="editor-root h-[calc(100vh-56px)] flex flex-col bg-neutral-50">
       {/* 顶栏 */}
@@ -914,12 +959,23 @@ export function BookEditorPage() {
         </aside>
       </div>
 
-      {/* 隐藏的文件选择器：点击预览图时触发上传 */}
+      {/* 隐藏的文件选择器：点击预览图时触发上传。
+          注意：不能用 display:none / visibility:hidden / pointer-events:none ——
+          移动端浏览器（iOS Safari、微信 WebView、部分安卓浏览器）对 input[type=file]
+          的 .click() 触发要求该元素自身仍可被指针命中，
+          否则会直接吞掉调用、相册选择器不会弹出。
+          这里采用「视觉隐藏 + 保留可交互」的写法。 */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/heic,image/*"
-        hidden
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          opacity: 0,
+          overflow: 'hidden',
+        }}
         onChange={handleFileChosen}
       />
       {/* 隐藏的文件选择器：图库「+ 添加」批量上传 */}
@@ -928,7 +984,13 @@ export function BookEditorPage() {
         type="file"
         accept="image/jpeg,image/png,image/webp,image/heic,image/*"
         multiple
-        hidden
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          opacity: 0,
+          overflow: 'hidden',
+        }}
         onChange={handleAddPhotosChosen}
       />
     </div>

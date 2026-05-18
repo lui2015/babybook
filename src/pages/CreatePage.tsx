@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useDraft } from '../DraftContext';
 import { filesToPhotos } from '../imageUtils';
@@ -71,13 +71,13 @@ export function CreatePage() {
       <Stepper step={step} setStep={setStep} draft={draft} />
 
       {presetHint && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-rose/30 bg-rose/10 px-4 py-2.5 text-sm text-neutral-700">
-          <span>
+        <div className="mt-4 flex items-start sm:items-center justify-between gap-3 rounded-xl border border-rose/30 bg-rose/10 px-4 py-2.5 text-sm text-neutral-700">
+          <span className="flex-1 min-w-0">
             已为你预选模板 <b className="text-rose">「{presetHint}」</b>，先上传照片，最后一步可以随时更换。
           </span>
           <button
             onClick={() => setPresetHint(null)}
-            className="text-neutral-400 hover:text-neutral-700"
+            className="text-neutral-400 hover:text-neutral-700 shrink-0"
             aria-label="关闭提示"
           >
             ×
@@ -86,8 +86,8 @@ export function CreatePage() {
       )}
 
       {autoSkipHint && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-          <span>
+        <div className="mt-3 flex items-start sm:items-center justify-between gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <span className="flex-1 min-w-0">
             {autoSkipHint}
             <span className="ml-1 text-amber-700/80">
               （已自动跳到上传步骤，传够 6 张会立刻为你生成画册）
@@ -95,7 +95,7 @@ export function CreatePage() {
           </span>
           <button
             onClick={() => setAutoSkipHint(null)}
-            className="text-amber-500 hover:text-amber-700"
+            className="text-amber-500 hover:text-amber-700 shrink-0"
             aria-label="关闭提示"
           >
             ×
@@ -177,6 +177,9 @@ function StepUpload({ onNext }: { onNext: () => void }) {
   // 拖拽排序：记录"正在拖动的照片 id"与"悬停在其上方的照片 id"
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  // 文件选择 input 的 ref。用 ref + onClick 主动触发可避开部分国产安卓
+  // 浏览器对 hidden / display:none input 在 label 上不响应的兼容性问题。
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function onFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -210,12 +213,54 @@ function StepUpload({ onNext }: { onNext: () => void }) {
     setPhotos(next);
   }
 
+  /** 把 index 处的照片向上/向下移动一格（移动端没有拖拽，用上下箭头按钮替代） */
+  function moveBy(index: number, delta: -1 | 1) {
+    const target = index + delta;
+    if (target < 0 || target >= photos.length) return;
+    const next = photos.slice();
+    [next[index], next[target]] = [next[target], next[index]];
+    setPhotos(next);
+  }
+
   const canNext = photos.length >= 6;
 
   return (
     <div className="space-y-5">
-      <label
-        className="block cursor-pointer rounded-2xl border-2 border-dashed border-neutral-300 bg-white/70 p-10 text-center hover:border-rose hover:bg-white transition"
+      {/* 隐藏 input 放在容器外，避免事件双触发 / 冒泡冲突。
+          注意：不能用 display:none / visibility:hidden / pointer-events:none。
+          移动端浏览器（iOS Safari、微信 WebView、部分安卓浏览器）出于安全策略，
+          对 <input type="file"> 的 .click() 触发要求 input 自身可被指针命中，
+          否则会直接吞掉这次调用，导致相册选择器不弹出。
+          这里用「视觉隐藏」而非「交互隐藏」：尺寸 1x1 + 透明度 0 即可。 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          opacity: 0,
+          overflow: 'hidden',
+        }}
+        onChange={(e) => {
+          onFiles(e.target.files);
+          // 重置 value，确保下次选同一组文件也能触发 onChange
+          e.target.value = '';
+        }}
+      />
+      <div
+        role="button"
+        tabIndex={0}
+        className="block cursor-pointer rounded-2xl border-2 border-dashed border-neutral-300 bg-white/70 p-10 text-center hover:border-rose hover:bg-white transition select-none"
+        onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
@@ -223,13 +268,6 @@ function StepUpload({ onNext }: { onNext: () => void }) {
           onFiles(e.dataTransfer.files);
         }}
       >
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={(e) => onFiles(e.target.files)}
-        />
         <div className="text-4xl mb-2">📷</div>
         <div className="font-medium">点击或拖拽照片到这里上传</div>
         <div className="text-xs text-neutral-500 mt-1">
@@ -240,14 +278,15 @@ function StepUpload({ onNext }: { onNext: () => void }) {
             正在处理 {progress.done} / {progress.total}...
           </div>
         )}
-      </label>
+      </div>
 
       {photos.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm text-neutral-600">
-              已选 <span className="font-bold text-neutral-900">{photos.length}</span> 张 ·
-              <span className="ml-1 text-neutral-400">拖动缩略图可调整顺序</span>
+              已选 <span className="font-bold text-neutral-900">{photos.length}</span> 张
+              <span className="ml-1 text-neutral-400 hidden sm:inline">· 拖动缩略图可调整顺序</span>
+              <span className="ml-1 text-neutral-400 sm:hidden">· 用 ← → 调整顺序</span>
               {photos.length > 60 && <span className="text-rose">（已超上限，会保留前 60 张）</span>}
             </div>
             <button
@@ -293,7 +332,7 @@ function StepUpload({ onNext }: { onNext: () => void }) {
                     setDragId(null);
                     setOverId(null);
                   }}
-                  className={`relative aspect-square group overflow-hidden rounded cursor-grab active:cursor-grabbing transition ${
+                  className={`relative aspect-square group overflow-hidden rounded sm:cursor-grab sm:active:cursor-grabbing transition ${
                     isDragging ? 'opacity-40 scale-95' : ''
                   } ${isOver ? 'ring-2 ring-rose ring-offset-1' : ''}`}
                 >
@@ -302,12 +341,42 @@ function StepUpload({ onNext }: { onNext: () => void }) {
                   <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/55 text-white text-[10px] leading-none">
                     {i + 1}
                   </div>
+                  {/* 删除按钮：桌面 hover 显示，移动端常显（点击区域 ≥24px 易触摸） */}
                   <button
+                    type="button"
                     onClick={() => removePhoto(p.id)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs opacity-0 group-hover:opacity-100 transition"
+                    aria-label="删除"
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition"
                   >
                     ×
                   </button>
+                  {/* 移动端排序按钮：左下/右下角的 ← → 一格平移；桌面 hover 才显示，避免遮图 */}
+                  <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between sm:opacity-0 sm:group-hover:opacity-100 transition pointer-events-none">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveBy(i, -1);
+                      }}
+                      disabled={i === 0}
+                      aria-label="前移"
+                      className="pointer-events-auto w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center disabled:opacity-30"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveBy(i, 1);
+                      }}
+                      disabled={i === photos.length - 1}
+                      aria-label="后移"
+                      className="pointer-events-auto w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center disabled:opacity-30"
+                    >
+                      ›
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -353,7 +422,10 @@ function StepTemplate({ onBack, onNext }: { onBack: () => void; onNext: () => vo
         ))}
       </div>
       <div className="text-xs text-neutral-500">
-        单击选中模板，<b className="text-neutral-700">双击直接生成画册</b>（等同于下方「生成画册」按钮）
+        <span className="hidden sm:inline">
+          单击选中模板，<b className="text-neutral-700">双击直接生成画册</b>（等同于下方「生成画册」按钮）
+        </span>
+        <span className="sm:hidden">点击选中模板，再点底部「生成画册」即可</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {list.map((t) => {
@@ -495,25 +567,29 @@ function StepGenerate({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <div className="font-display text-2xl font-bold">画册已生成 🎉</div>
-          <div className="text-sm text-neutral-600">
-            共 {preview.pages.length} 页 · 模板 {tpl.name} · 左右箭头 / 键盘 ← → 翻页
+        <div className="min-w-0">
+          <div className="font-display text-xl sm:text-2xl font-bold">画册已生成 🎉</div>
+          <div className="text-xs sm:text-sm text-neutral-600">
+            共 {preview.pages.length} 页 · 模板 {tpl.name}
+            <span className="hidden sm:inline"> · 左右箭头 / 键盘 ← → 翻页</span>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={onBack} className="px-4 py-2 rounded-full border border-neutral-200 text-sm">
+        <div className="flex gap-2 flex-wrap w-full sm:w-auto">
+          <button
+            onClick={onBack}
+            className="flex-1 sm:flex-none px-4 py-2 rounded-full border border-neutral-200 text-sm"
+          >
             换个模板
           </button>
           <button
             onClick={() => onDone(preview, { edit: true })}
-            className="px-5 py-2.5 rounded-full border border-rose text-rose hover:bg-rose/5 text-sm"
+            className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 rounded-full border border-rose text-rose hover:bg-rose/5 text-sm"
           >
             ✎ 编辑画册
           </button>
           <button
             onClick={() => onDone(preview)}
-            className="px-5 py-2.5 rounded-full bg-neutral-900 text-white text-sm"
+            className="flex-1 sm:flex-none px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-neutral-900 text-white text-sm"
           >
             保存并查看
           </button>

@@ -12,10 +12,10 @@ export function HomePage() {
   const isCyberpunk = theme === 'cyberpunk';
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:py-10">
       {/* Hero */}
       <section
-        className="relative overflow-hidden rounded-3xl p-8 sm:p-14"
+        className="relative overflow-hidden rounded-3xl p-6 sm:p-14"
         style={{
           background: `linear-gradient(135deg, var(--bb-hero-from) 0%, var(--bb-hero-via) 50%, var(--bb-hero-to) 100%)`,
           border: '1px solid var(--bb-border)',
@@ -25,11 +25,9 @@ export function HomePage() {
         }}
       >
         <div className="pattern-dot absolute inset-0 opacity-20" />
-        <div className="relative flex flex-col sm:flex-row items-center gap-8">
-          <div className="flex-1 space-y-5">
-            <div
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs tracking-widest bb-pill"
-            >
+        <div className="relative flex flex-col sm:flex-row items-center gap-6 sm:gap-8">
+          <div className="flex-1 space-y-4 sm:space-y-5 w-full">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] sm:text-xs tracking-widest bb-pill">
               <span>{isCyberpunk ? '⚡' : '🐣'}</span>
               <span>
                 {isCyberpunk
@@ -38,7 +36,7 @@ export function HomePage() {
               </span>
             </div>
             <h1
-              className="font-display text-4xl sm:text-5xl leading-tight font-bold"
+              className="font-display text-3xl sm:text-5xl leading-tight font-bold"
               style={{ color: 'var(--bb-fg)' }}
             >
               {isCyberpunk ? (
@@ -58,36 +56,36 @@ export function HomePage() {
               )}
             </h1>
             <p
-              className="max-w-md leading-relaxed"
+              className="max-w-md text-sm sm:text-base leading-relaxed"
               style={{ color: 'var(--bb-fg-muted)' }}
             >
               {isCyberpunk
                 ? '挑选一组宝宝照片，选择喜欢的模板，几秒钟便得一本未来感十足的电子画册 —— 可翻阅、可分享、可留存。'
                 : '挑选一组宝宝照片，选择你喜欢的模板，几秒钟内就能得到一本温馨精致的电子画册，可翻阅、可分享、可留存。'}
             </p>
-            <div className="flex gap-3 pt-2">
+            <div className="flex flex-wrap gap-3 pt-2">
               <Link
                 to="/create"
-                className="px-6 py-3 rounded-full transition bb-btn-primary hover:opacity-90"
+                className="px-5 sm:px-6 py-2.5 sm:py-3 rounded-full transition bb-btn-primary hover:opacity-90 text-sm sm:text-base"
               >
                 立即创建
               </Link>
               <Link
                 to="/my"
-                className="px-6 py-3 rounded-full transition bb-btn-ghost"
+                className="px-5 sm:px-6 py-2.5 sm:py-3 rounded-full transition bb-btn-ghost text-sm sm:text-base"
               >
                 我的画册
               </Link>
             </div>
           </div>
-          <div className="flex-1 relative h-[280px] sm:h-[320px] w-full">
+          <div className="flex-1 relative h-[220px] sm:h-[320px] w-full">
             <FakeBookPreview neon={isCyberpunk} />
           </div>
         </div>
       </section>
 
       {/* 特性 */}
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8">
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-6 sm:mt-8">
         <Feature
           icon="🖼️"
           title="10+ 精美模板"
@@ -106,10 +104,10 @@ export function HomePage() {
       </section>
 
       {/* 模板预览 */}
-      <section className="mt-10">
+      <section className="mt-8 sm:mt-10">
         <div className="flex items-end justify-between mb-4">
           <h2
-            className="font-display text-2xl font-bold"
+            className="font-display text-xl sm:text-2xl font-bold"
             style={{ color: 'var(--bb-fg)' }}
           >
             热门模板
@@ -122,17 +120,17 @@ export function HomePage() {
             查看全部 →
           </Link>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           {TEMPLATES.slice(0, 8).map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setPreviewTpl(t)}
-              className="group block text-left rounded-xl overflow-hidden bb-card hover:-translate-y-0.5 transition focus:outline-none"
+              className="group block text-left rounded-xl overflow-hidden bb-card hover:-translate-y-0.5 active:scale-[0.98] transition focus:outline-none"
               title={`预览模板「${t.name}」`}
             >
               <div
-                className="relative aspect-[3/4] flex flex-col items-center justify-center p-4 text-center"
+                className="relative aspect-[3/4] flex flex-col items-center justify-center p-3 sm:p-4 text-center"
                 style={{
                   background: t.backgroundPattern
                     ? `${t.backgroundPattern}, ${t.colors.paper}`
@@ -140,17 +138,18 @@ export function HomePage() {
                   color: t.colors.text,
                 }}
               >
-                <div className="text-3xl mb-2" style={{ color: t.colors.primary }}>
+                <div className="text-2xl sm:text-3xl mb-2" style={{ color: t.colors.primary }}>
                   {t.decorations[0]}
                 </div>
                 <div
-                  className="font-bold text-sm"
+                  className="font-bold text-xs sm:text-sm"
                   style={{ color: t.colors.primary, fontFamily: t.fontFamily.title }}
                 >
                   {t.defaultTitle}
                 </div>
                 <div className="text-[10px] mt-1 opacity-70">{t.defaultSubtitle}</div>
-                <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition">
+                {/* 桌面悬浮蒙层提示，触屏直接点击就能打开预览，无需提示文案 */}
+                <div className="hidden sm:flex absolute inset-0 items-center justify-center bg-black/0 group-hover:bg-black/30 transition">
                   <span className="opacity-0 group-hover:opacity-100 transition px-3 py-1.5 rounded-full bg-white/90 text-neutral-900 text-xs font-medium shadow">
                     预览效果 →
                   </span>
@@ -160,9 +159,9 @@ export function HomePage() {
                 className="px-3 py-2 text-xs flex items-center justify-between"
                 style={{ color: 'var(--bb-fg)' }}
               >
-                <span className="font-medium">{t.name}</span>
+                <span className="font-medium truncate">{t.name}</span>
                 <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded ${
+                  className={`shrink-0 ml-2 text-[10px] px-1.5 py-0.5 rounded ${
                     t.isFree ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                   }`}
                 >
@@ -185,7 +184,7 @@ export function HomePage() {
       />
 
       <footer
-        className="mt-16 text-center text-xs"
+        className="mt-12 sm:mt-16 text-center text-xs"
         style={{ color: 'var(--bb-fg-muted)' }}
       >
         © {new Date().getFullYear()} BabyBook · 用心记录宝宝的每一个瞬间
@@ -196,7 +195,7 @@ export function HomePage() {
 
 function Feature({ icon, title, text }: { icon: string; title: string; text: string }) {
   return (
-    <div className="rounded-2xl p-5 bb-card">
+    <div className="rounded-2xl p-4 sm:p-5 bb-card">
       <div className="text-2xl mb-2">{icon}</div>
       <div className="font-bold mb-1" style={{ color: 'var(--bb-fg)' }}>
         {title}
@@ -213,7 +212,7 @@ function FakeBookPreview({ neon = false }: { neon?: boolean }) {
     <div className="absolute inset-0 flex items-center justify-center">
       <div className="relative">
         <div
-          className="w-44 h-56 sm:w-52 sm:h-64 rounded-md shadow-book rotate-[-8deg] absolute left-0 top-3 flex items-center justify-center text-4xl"
+          className="w-32 h-44 sm:w-52 sm:h-64 rounded-md shadow-book rotate-[-8deg] absolute left-0 top-3 flex items-center justify-center text-3xl sm:text-4xl"
           style={{
             background: neon
               ? 'linear-gradient(135deg, #0b0420 0%, #1a0730 100%)'
@@ -227,7 +226,7 @@ function FakeBookPreview({ neon = false }: { neon?: boolean }) {
           {neon ? '◬' : '🌸'}
         </div>
         <div
-          className="w-44 h-56 sm:w-52 sm:h-64 rounded-md shadow-book rotate-[3deg] absolute left-8 top-0 flex items-center justify-center text-5xl"
+          className="w-32 h-44 sm:w-52 sm:h-64 rounded-md shadow-book rotate-[3deg] absolute left-6 sm:left-8 top-0 flex items-center justify-center text-4xl sm:text-5xl"
           style={{
             background: neon
               ? 'linear-gradient(135deg, #ff2bd6 0%, #7c3aed 100%)'
@@ -240,7 +239,7 @@ function FakeBookPreview({ neon = false }: { neon?: boolean }) {
           👶
         </div>
         <div
-          className="w-44 h-56 sm:w-52 sm:h-64 rounded-md shadow-book rotate-[10deg] absolute left-20 top-4 flex items-center justify-center"
+          className="w-32 h-44 sm:w-52 sm:h-64 rounded-md shadow-book rotate-[10deg] absolute left-14 sm:left-20 top-4 flex items-center justify-center"
           style={{
             background: neon ? '#08131c' : '#fff',
             boxShadow: neon
@@ -250,16 +249,16 @@ function FakeBookPreview({ neon = false }: { neon?: boolean }) {
           }}
         >
           <div className="text-center">
-            <div className="text-3xl" style={neon ? { color: '#ff2bd6' } : undefined}>
+            <div className="text-2xl sm:text-3xl" style={neon ? { color: '#ff2bd6' } : undefined}>
               {neon ? '⌁' : '✿'}
             </div>
             <div
-              className={`font-display font-bold text-lg mt-2 ${neon ? 'bb-neon-text-cyan' : ''}`}
+              className={`font-display font-bold text-base sm:text-lg mt-2 ${neon ? 'bb-neon-text-cyan' : ''}`}
             >
               {neon ? 'NEON' : 'Sweet'}
             </div>
             <div
-              className={`font-display italic text-sm ${neon ? 'bb-neon-text' : ''}`}
+              className={`font-display italic text-xs sm:text-sm ${neon ? 'bb-neon-text' : ''}`}
             >
               {neon ? 'Baby.exe' : 'Moments'}
             </div>

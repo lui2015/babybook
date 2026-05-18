@@ -129,6 +129,39 @@ body {
   -webkit-font-smoothing: antialiased;
   font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   transition: background-color 300ms ease, color 300ms ease;
+  /* 移动端兜底：避免任意子节点撑出导致全页横向滚动 */
+  overflow-x: hidden;
+}
+
+/* 移动端基础适配 */
+@media (max-width: 640px) {
+  /* iOS Safari 下 background-attachment: fixed 性能差且可能丢失，改成普通滚动 */
+  body {
+    background-attachment: scroll;
+  }
+  /* 防止 iOS 在表单聚焦时把页面字号自动放大 */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* 安全区：留给底部 home indicator / 顶部刘海 */
+.bb-safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+.bb-safe-top {
+  padding-top: max(env(safe-area-inset-top), 0px);
+}
+
+/* 全屏覆盖层（如移动端抽屉）顶部安全区。
+ * 抽屉本身已经通过 React Portal 渲染到 body 顶层、并设置了高 z-index
+ * 来盖住整个屏幕，所以这里只需要避免内容紧贴屏幕顶端：
+ * - 有刘海/打孔屏的设备：env(safe-area-inset-top) 通常为 30~60px，按系统值。
+ * - 普通桌面/无刘海设备：兜底 8px，保证抽屉头部和顶端有一点呼吸空间。 */
+.bb-overlay-safe-top {
+  padding-top: max(env(safe-area-inset-top), 8px);
 }
 
 /* ============================================================

@@ -101,7 +101,7 @@ export function AccountDialog({ initialMode, onClose }: Props) {
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center px-4 py-6 overflow-y-auto"
       style={{ background: 'rgba(15,23,42,0.45)' }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !submitting) onClose();
@@ -109,7 +109,7 @@ export function AccountDialog({ initialMode, onClose }: Props) {
     >
       <div
         ref={dialogRef}
-        className="w-full max-w-sm rounded-2xl p-5 bb-card"
+        className="w-full max-w-sm rounded-2xl p-5 bb-card my-auto"
         style={{ background: 'var(--bb-card-bg)' }}
       >
         {/* Tabs */}

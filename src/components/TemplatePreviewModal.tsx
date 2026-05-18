@@ -161,11 +161,11 @@ export function TemplatePreviewModal({ template, onClose, onUse }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部：标题区（紧凑） */}
-        <header className="flex items-center justify-between gap-4 px-6 py-2.5 border-b border-black/5 shrink-0">
-          <div className="min-w-0">
+        <header className="flex items-center justify-between gap-3 px-3 sm:px-6 py-2 sm:py-2.5 border-b border-black/5 shrink-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-display text-lg font-bold truncate">{template.name}</h3>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600">
+              <h3 className="font-display text-base sm:text-lg font-bold truncate">{template.name}</h3>
+              <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600">
                 {template.category}
               </span>
               <span
@@ -198,7 +198,7 @@ export function TemplatePreviewModal({ template, onClose, onUse }: Props) {
             布局：书本占据绝大部分空间（flex-1），下方放紧凑的单行控件条。
             关键：BookStage 自己测量容器宽高并按 3:2 比例夹到不溢出，用户无需滚动。 */}
         <div
-          className="flex-1 min-h-0 flex flex-col overflow-hidden px-4 sm:px-6 pt-3 pb-2"
+          className="flex-1 min-h-0 flex flex-col overflow-hidden px-2 sm:px-6 pt-2 sm:pt-3 pb-2"
           style={{ background: template.colors.bg }}
         >
           {/* 书本舞台：独占剩余高度 */}
@@ -255,20 +255,20 @@ export function TemplatePreviewModal({ template, onClose, onUse }: Props) {
         </div>
 
         {/* 底部：操作区 */}
-        <footer className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-black/5 bg-white shrink-0">
-          <div className="text-xs text-neutral-500 text-center sm:text-left">
+        <footer className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 px-4 sm:px-6 py-2.5 sm:py-3 border-t border-black/5 bg-white shrink-0">
+          <div className="hidden sm:block text-xs text-neutral-500 text-center sm:text-left">
             使用该模板后，照片会按你上传的内容重新排版，字体、配色、装饰与预览一致。
           </div>
           <div className="flex gap-2 shrink-0">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-full bg-neutral-100 hover:bg-neutral-200 text-sm transition"
+              className="flex-1 sm:flex-none px-4 py-2 rounded-full bg-neutral-100 hover:bg-neutral-200 text-sm transition"
             >
               再看看
             </button>
             <button
               onClick={() => onUse(template)}
-              className="px-5 py-2 rounded-full bg-neutral-900 text-white hover:opacity-90 text-sm shadow-lg shadow-rose/20 transition"
+              className="flex-1 sm:flex-none px-5 py-2 rounded-full bg-neutral-900 text-white hover:opacity-90 text-sm shadow-lg shadow-rose/20 transition"
             >
               使用此模板 →
             </button>

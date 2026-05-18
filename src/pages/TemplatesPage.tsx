@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { TemplatePreviewModal } from '../components/TemplatePreviewModal';
 import { useTemplateRegistry } from '../TemplateRegistry';
 import { deleteUserTemplate, isUserTemplateId } from '../userTemplates';
+import { useAuth } from '../AuthContext';
 import type { Template, TemplateCategory, TemplateStyle } from '../types';
 
 type PriceFilter = 'all' | 'free' | 'vip';
@@ -43,6 +44,7 @@ export function TemplatesPage() {
   const navigate = useNavigate();
   const { allTemplates, userTemplates, builtinTemplates, refresh } =
     useTemplateRegistry();
+  const { user, isAuthenticated } = useAuth();
   const [previewTpl, setPreviewTpl] = useState<Template | null>(null);
   // 单击仅选中卡片（轻量高亮 + 提示文案变化），双击才进入「生成预览页面」
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -97,15 +99,31 @@ export function TemplatesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:py-8">
       {/* 标题 */}
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-5 sm:mb-6">
         <div>
-          <h1 className="font-display text-3xl font-bold">全部模板</h1>
-          <p className="text-sm text-neutral-600 mt-1">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold">全部模板</h1>
+          <p className="text-xs sm:text-sm text-neutral-600 mt-1">
             共 <span className="font-semibold text-neutral-900">{allTemplates.length}</span> 套模板
-            （官方 {builtinTemplates.length} · 自定义 {userTemplates.length}），按分类、风格、价格任意筛选
+            <span className="hidden sm:inline">
+              （官方 {builtinTemplates.length} · 自定义 {userTemplates.length}），按分类、风格、价格任意筛选
+            </span>
           </p>
+          {/* 自定义模板的云端同步状态：仅在已拿到云端身份时展示 */}
+          {isAuthenticated && (
+            <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] border border-emerald-100">
+              <span>☁️</span>
+              <span>
+                自定义模板已{user?.isAnonymous ? '保存到云端' : '同步至账号'}
+                {user?.isAnonymous && (
+                  <span className="text-emerald-600/70 ml-1 hidden sm:inline">
+                    · 升级账号后可在其他设备访问
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input
@@ -127,7 +145,7 @@ export function TemplatesPage() {
           <button
             type="button"
             onClick={() => navigate('/templates/new')}
-            className="px-4 py-2 text-sm rounded-full bg-gradient-to-r from-rose to-peach text-white shadow hover:opacity-90 whitespace-nowrap"
+            className="px-4 py-2 text-sm rounded-full bg-gradient-to-r from-rose to-peach text-white shadow hover:opacity-90 whitespace-nowrap flex-1 sm:flex-none"
           >
             + 创建自定义模板
           </button>
@@ -371,9 +389,11 @@ function EmptyState({
 
 function FilterRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3">
-      <div className="shrink-0 pt-1.5 w-12 text-xs text-neutral-500">{label}</div>
-      <div className="flex flex-wrap gap-2">{children}</div>
+    <div className="flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-3">
+      <div className="shrink-0 sm:pt-1.5 sm:w-12 text-[11px] sm:text-xs text-neutral-500">
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1.5 sm:gap-2">{children}</div>
     </div>
   );
 }

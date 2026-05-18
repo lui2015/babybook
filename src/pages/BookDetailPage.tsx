@@ -215,21 +215,21 @@ export function BookDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 book-detail-root">
+    <div className="mx-auto max-w-6xl px-3 sm:px-4 py-4 sm:py-6 book-detail-root">
       {/* 打印专用样式（仅打印时生效） */}
       <style>{PRINT_CSS}</style>
       {/* 全屏预览样式 */}
       <style>{FULLSCREEN_CSS}</style>
 
-      {/* 工具栏 */}
-      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap no-print">
+      {/* 工具栏：窄屏先标题独占一行，再让按钮组横向滚动；桌面恢复 wrap */}
+      <div className="mb-4 sm:mb-5 no-print space-y-3">
         <div>
-          <h1 className="font-display text-2xl font-bold">{book.title}</h1>
-          <div className="text-xs text-neutral-500">
+          <h1 className="font-display text-xl sm:text-2xl font-bold truncate">{book.title}</h1>
+          <div className="text-[11px] sm:text-xs text-neutral-500 truncate">
             {template.name} · {total} 页 · 创建于 {formatDate(book.createdAt)}
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 overflow-x-auto sm:flex-wrap pb-1 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible">
           <ToolBtn onClick={renameBook}>重命名</ToolBtn>
           <ToolBtn onClick={() => navigate(`/book/${book!.id}/edit`)} primary>
             ✎ 编辑画册

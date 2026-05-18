@@ -3,6 +3,8 @@
 // - 其它页面（TemplatesPage、CreatePage、BookDetailPage、MyBooksPage）
 //   通过 useAllTemplates() 读取，无需关心模板来自哪里
 // - 自定义模板变化后（新增/编辑/删除），调用 refresh() 重新加载
+// - 登录态变化时（拿到云端身份 / 切账号 / 退出），自动重新拉取
+//   并在首次拿到云端身份时把本地遗留模板静默迁移到云端
 
 import {
   createContext,
@@ -10,12 +12,19 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import type { Template } from './types';
 import { TEMPLATES as BUILTIN_TEMPLATES } from './templates';
-import { listUserTemplates, type UserTemplate } from './userTemplates';
+import {
+  hasLocalTemplates,
+  listUserTemplates,
+  migrateLocalTemplatesToCloud,
+  type UserTemplate,
+} from './userTemplates';
+import { useAuth } from './AuthContext';
 
 interface TemplateRegistryValue {
   /** 内置模板（只读） */
@@ -33,16 +42,43 @@ interface TemplateRegistryValue {
 const Ctx = createContext<TemplateRegistryValue | null>(null);
 
 export function TemplateRegistryProvider({ children }: { children: ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [userTemplates, setUserTemplates] = useState<UserTemplate[]>([]);
+  // 已经为某个 uid 完成过本地→云端的迁移检测，避免反复触发
+  const migratedUidRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     const list = await listUserTemplates();
     setUserTemplates(list);
   }, []);
 
+  // 登录态拿到 uid 后再首刷；同时在首次进入云端身份时静默迁移本地遗留模板
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (authLoading) return;
+
+    let cancelled = false;
+    (async () => {
+      // 当前已登录（含匿名云端身份）：检查是否有本地遗留模板需要迁
+      if (user?.uid && migratedUidRef.current !== user.uid) {
+        migratedUidRef.current = user.uid;
+        try {
+          if (await hasLocalTemplates()) {
+            await migrateLocalTemplatesToCloud();
+          }
+        } catch (err) {
+          // 迁移失败不阻塞列表加载，下次登录会再尝试
+          console.warn('[TemplateRegistry] migrate failed', err);
+        }
+      }
+      if (!cancelled) {
+        await refresh();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user?.uid, refresh]);
 
   const value = useMemo<TemplateRegistryValue>(() => {
     const all: Template[] = [...userTemplates, ...BUILTIN_TEMPLATES];

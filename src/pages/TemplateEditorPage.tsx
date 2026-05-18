@@ -232,6 +232,20 @@ export function TemplateEditorPage() {
   // 模板编辑器内置一组示例图片，用于 OverlayPhoto 槽位"在编辑器中预览图片"模式
   const [previewBoundPhotos, setPreviewBoundPhotos] = useState(false);
 
+  // 模板编辑器同样需要大屏；在窄屏给出友好提示
+  const [forceNarrow, setForceNarrow] = useState(false);
+  const [isNarrow, setIsNarrow] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 1024;
+  });
+  useEffect(() => {
+    function onResize() {
+      setIsNarrow(window.innerWidth < 1024);
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   // 加载（编辑时）或初始化
   useEffect(() => {
     if (!id) {
@@ -268,6 +282,36 @@ export function TemplateEditorPage() {
   }
   if (!draft) {
     return <div className="py-20 text-center text-neutral-500">加载中…</div>;
+  }
+
+  if (isNarrow && !forceNarrow) {
+    return (
+      <div className="min-h-[calc(100vh-56px)] bg-neutral-50 px-5 py-10 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-soft border border-neutral-200 p-6 text-center">
+          <div className="text-4xl mb-3">🖥️</div>
+          <h1 className="font-display text-xl font-bold mb-2">建议在大屏上设计模板</h1>
+          <p className="text-sm text-neutral-600 leading-relaxed mb-5">
+            模板编辑器需要拖拽、对位与精细操作，
+            <br />
+            建议使用 iPad 横屏 / 平板 / 电脑打开本页面进行设计。
+          </p>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => navigate('/templates')}
+              className="w-full py-2.5 rounded-full bg-rose text-white text-sm font-medium hover:bg-rose-dark transition"
+            >
+              返回模板列表
+            </button>
+            <button
+              onClick={() => setForceNarrow(true)}
+              className="w-full py-2.5 rounded-full border border-neutral-300 text-neutral-600 text-sm hover:border-neutral-500 transition"
+            >
+              我了解，仍在小屏继续
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const pages = draft.pages ?? [];

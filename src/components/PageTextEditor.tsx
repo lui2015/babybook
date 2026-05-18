@@ -252,6 +252,8 @@ function layoutLabel(layout: BookPage['layout']): string {
       return '文字页';
     case 'ending':
       return '尾页';
+    default:
+      return '页面';
   }
 }
 

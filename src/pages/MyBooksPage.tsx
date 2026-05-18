@@ -38,16 +38,16 @@ export function MyBooksPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <h1
-          className="font-display text-3xl font-bold"
+          className="font-display text-2xl sm:text-3xl font-bold"
           style={{ color: 'var(--bb-fg)' }}
         >
           我的画册
         </h1>
         <Link
           to="/create"
-          className="px-5 py-2.5 rounded-full text-sm bb-btn-primary"
+          className="px-4 sm:px-5 py-2 sm:py-2.5 rounded-full text-sm bb-btn-primary whitespace-nowrap"
         >
           + 新建画册
         </Link>
@@ -167,7 +167,8 @@ function BookCard({ book, onDelete }: { book: Book; onDelete: () => void }) {
       </div>
       <button
         onClick={handleDelete}
-        className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white text-sm opacity-0 group-hover:opacity-100 transition"
+        aria-label="删除画册"
+        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white text-base flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition"
         title="删除"
       >
         ×
