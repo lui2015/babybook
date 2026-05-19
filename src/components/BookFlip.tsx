@@ -229,7 +229,9 @@ export function BookFlip({
 
       {/* 主视图 */}
       <div
-        className="rounded-3xl p-4 sm:p-8 flex items-center justify-center select-none"
+        // 手机端把外层 padding 收紧到 p-2，让出更多空间给相册本身；
+        // sm 以上恢复 p-8 留出舒服的边距。
+        className="rounded-2xl sm:rounded-3xl p-2 sm:p-8 flex items-center justify-center select-none relative"
         style={{
           background: bgColor ?? template.colors.bg,
           minHeight: minStageHeight,
@@ -245,11 +247,19 @@ export function BookFlip({
           flipSpread(dx < 0 ? 1 : -1);
         }}
       >
+        {/*
+          布局策略：
+          - 手机（<sm）：导航箭头改为「绝对定位悬浮在画册两侧」，不再占 flex 列；
+            画册本身用整个容器宽度，最大化展示。
+          - 桌面（≥sm）：保留原来的 flex 行内布局，箭头 + 画册 + 箭头并列，体验不变。
+        */}
         <div className="flex items-center gap-3 sm:gap-4 w-full">
+          {/* 桌面端的左侧箭头 */}
           <NavArrow
             onClick={() => flipSpread(-1)}
             disabled={spreadIndex === 0 || !!flip}
             dir="left"
+            className="hidden sm:flex"
           />
 
           {/* 翻书舞台（透视 + 3D），对开宽高比 = 2 * 3:4 = 3:2 */}
@@ -349,8 +359,23 @@ export function BookFlip({
             onClick={() => flipSpread(1)}
             disabled={currentSpreadNo >= totalSpreads - 1 || !!flip}
             dir="right"
+            className="hidden sm:flex"
           />
         </div>
+
+        {/* 手机端：悬浮在画册左右两侧的小箭头（半透明，不挡画册） */}
+        <NavArrow
+          onClick={() => flipSpread(-1)}
+          disabled={spreadIndex === 0 || !!flip}
+          dir="left"
+          className="sm:hidden absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 z-10 bg-white/80 shadow-md"
+        />
+        <NavArrow
+          onClick={() => flipSpread(1)}
+          disabled={currentSpreadNo >= totalSpreads - 1 || !!flip}
+          dir="right"
+          className="sm:hidden absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 z-10 bg-white/80 shadow-md"
+        />
       </div>
 
       {/* 页码：对开页码 + 单页位置 */}
@@ -412,17 +437,21 @@ function NavArrow({
   onClick,
   disabled,
   dir,
+  className = '',
 }: {
   onClick: () => void;
   disabled?: boolean;
   dir: 'left' | 'right';
+  /** 额外类（用于 hidden sm:flex / 手机端悬浮定位等） */
+  className?: string;
 }) {
+  // 默认尺寸 w-10 h-10；调用方可通过 className 用 w-9 h-9 等覆盖（Tailwind 后写优先）
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       aria-label={dir === 'left' ? '上一跨页' : '下一跨页'}
-      className="w-10 h-10 rounded-full bg-white/70 backdrop-blur border border-white hover:bg-white disabled:opacity-30 transition flex-shrink-0 text-xl"
+      className={`w-10 h-10 rounded-full bg-white/70 backdrop-blur border border-white hover:bg-white disabled:opacity-30 transition flex-shrink-0 text-xl flex items-center justify-center ${className}`}
     >
       {dir === 'left' ? '‹' : '›'}
     </button>

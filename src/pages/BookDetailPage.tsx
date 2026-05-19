@@ -362,7 +362,11 @@ function ToolBtn({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-3 py-1.5 rounded-full text-sm border transition ${cls} disabled:opacity-40`}
+      // 关键点：
+      //  1) whitespace-nowrap：避免在窄屏 flex 容器里被「按字断行」压成竖排
+      //  2) flex-shrink-0：横向滚动条容器中不被挤压
+      //  3) 手机端用更紧凑的 px/py/text-xs，桌面端 sm: 恢复
+      className={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 sm:px-3 sm:py-1.5 rounded-full text-xs sm:text-sm border transition ${cls} disabled:opacity-40`}
     >
       {children}
     </button>
