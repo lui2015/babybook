@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getBook, saveBook } from '../storage';
 import { useTemplateRegistry } from '../TemplateRegistry';
 import { PageView } from '../components/PageView';
+import { BottomSheet } from '../components/BottomSheet';
 import { applyBookTheme } from '../bookTheme';
 import { VARIANTS, defaultVariantId } from '../layoutVariants';
 import { fileToPhoto } from '../imageUtils';
@@ -61,20 +62,26 @@ export function BookEditorPage() {
   // 左下「新增页面」弹出版式选择
   const [addPagePickerOpen, setAddPagePickerOpen] = useState(false);
 
-  // 编辑器需要较大的屏幕（三栏布局 + 鼠标精细操作），
-  // 在窄屏给出"建议使用大屏"的友好提示；用户确认后仍可继续
-  const [forceNarrow, setForceNarrow] = useState(false);
-  const [isNarrow, setIsNarrow] = useState<boolean>(() => {
+  // —— 响应式：小屏（<768px）走「全屏预览 + 底部 Tab + 抽屉」布局；
+  //         中等屏（768~1023）走桌面三栏（侧栏会比较紧凑但仍可用）；
+  //         大屏正常三栏。 ——
+  // 之前 <1024 一律弹窄屏拦截卡；现在已为小屏做了真正的移动布局，故拦截卡只保留为空（不再阻断）。
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    return window.innerWidth < 1024;
+    return window.innerWidth < 768;
   });
   useEffect(() => {
     function onResize() {
-      setIsNarrow(window.innerWidth < 1024);
+      setIsMobile(window.innerWidth < 768);
     }
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // 移动端底部 Tab Bar：当前打开的抽屉（null 表示未打开）
+  const [mobileSheet, setMobileSheet] = useState<
+    null | 'pages' | 'text' | 'layout' | 'theme'
+  >(null);
 
   // —— 左侧页面列表拖拽排序状态 ——
   // dragFromIdx：正在被拖的那一页；null 表示没有拖拽中
@@ -567,33 +574,72 @@ export function BookEditorPage() {
     });
   }
 
-  if (isNarrow && !forceNarrow) {
+  // —— 移动端布局：全屏预览 + 顶栏 + 大翻页按钮 + 触屏滑动 + 底部 Tab Bar + 抽屉 ——
+  if (isMobile) {
     return (
-      <div className="min-h-[calc(100vh-56px)] bg-neutral-50 px-5 py-10 flex items-center justify-center">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-soft border border-neutral-200 p-6 text-center">
-          <div className="text-4xl mb-3">🖥️</div>
-          <h1 className="font-display text-xl font-bold mb-2">建议在大屏上编辑</h1>
-          <p className="text-sm text-neutral-600 leading-relaxed mb-5">
-            画册编辑器需要拖拽、对位与精细操作，在小屏体验欠佳。
-            <br />
-            建议使用 iPad 横屏 / 平板 / 电脑打开本页面进行编辑。
-          </p>
-          <div className="flex flex-col gap-2">
-            <button
-              onClick={backToDetail}
-              className="w-full py-2.5 rounded-full bg-rose text-white text-sm font-medium hover:bg-rose-dark transition"
-            >
-              返回画册详情
-            </button>
-            <button
-              onClick={() => setForceNarrow(true)}
-              className="w-full py-2.5 rounded-full border border-neutral-300 text-neutral-600 text-sm hover:border-neutral-500 transition"
-            >
-              我了解，仍在小屏继续
-            </button>
-          </div>
-        </div>
-      </div>
+      <MobileEditorLayout
+        book={book}
+        template={template}
+        rawTemplate={rawTemplate}
+        index={index}
+        total={total}
+        currentPage={currentPage}
+        saving={saving}
+        uploading={uploading}
+        adding={adding}
+        selectedPhotoId={selectedPhotoId}
+        selectedOverlayId={selectedOverlayId}
+        addPagePickerOpen={addPagePickerOpen}
+        setAddPagePickerOpen={setAddPagePickerOpen}
+        mobileSheet={mobileSheet}
+        setMobileSheet={setMobileSheet}
+        backToDetail={backToDetail}
+        onSetIndex={setIndex}
+        onSelectPhoto={(id) => {
+          setSelectedPhotoId(id);
+          setSelectedOverlayId(null);
+        }}
+        onSelectOverlay={(id) => {
+          setSelectedOverlayId(id);
+          if (id) setSelectedPhotoId(null);
+        }}
+        onClearSelection={() => {
+          setSelectedPhotoId(null);
+          setSelectedOverlayId(null);
+        }}
+        onSetOverlays={setOverlays}
+        onAdjustFocus={handleAdjustFocus}
+        onTriggerUploadReplace={triggerUploadReplace}
+        selectedSlotIndex={selectedSlot()}
+        onResetFocus={() => {
+          const s = selectedSlot();
+          if (s >= 0) setPhotoFocus(s, undefined);
+        }}
+        patchCurrentPage={patchCurrentPage}
+        updateBook={updateBook}
+        addOverlay={addOverlay}
+        patchOverlay={patchOverlay}
+        removeOverlay={removeOverlay}
+        addPageAfter={addPageAfter}
+        deletePageAt={deletePageAt}
+        movePage={movePage}
+        changeLayout={changeLayout}
+        changeVariant={changeVariant}
+        replacePhotoAt={replacePhotoAt}
+        reshufflePagePhotos={reshufflePagePhotos}
+        setPhotoShape={setPhotoShape}
+        handlePickFromLibrary={handlePickFromLibrary}
+        handleDeletePhoto={handleDeletePhoto}
+        openAddPhotos={openAddPhotos}
+        dragFromIdx={dragFromIdx}
+        setDragFromIdx={setDragFromIdx}
+        dragOverIdx={dragOverIdx}
+        setDragOverIdx={setDragOverIdx}
+        fileInputRef={fileInputRef}
+        addPhotoInputRef={addPhotoInputRef}
+        handleFileChosen={handleFileChosen}
+        handleAddPhotosChosen={handleAddPhotosChosen}
+      />
     );
   }
 
@@ -991,6 +1037,564 @@ export function BookEditorPage() {
           opacity: 0,
           overflow: 'hidden',
         }}
+        onChange={handleAddPhotosChosen}
+      />
+    </div>
+  );
+}
+
+/* ============================================================
+ *  移动端编辑布局（<768px 才会启用）
+ *  - 顶栏：返回 / 标题 / 页面按钮 / 完成
+ *  - 主区：全屏预览（PageView）+ 翻页大按钮（左右浮动）+ 触屏左右滑动翻页
+ *  - 选中态浮条：点一张图片选中后显示「上传替换 / 重置位置 / 取消」
+ *  - 底部 Tab Bar：页面 / 文字 / 排版 / 主题；点击弹出 BottomSheet
+ *  - 抽屉内容：复用桌面版的 TextTab / LayoutTab / ThemeTab，
+ *    以及左侧页面缩略图列表（增删页、拖拽排序、新增页面）
+ *
+ *  这一层只是「壳」，真正的编辑数据/回调全部由 BookEditorPage 主函数体注入。
+ *  桌面版三栏布局完全保留在 BookEditorPage 主分支里。
+ * ============================================================ */
+function MobileEditorLayout(props: {
+  book: Book;
+  template: Template;
+  rawTemplate: Template;
+  index: number;
+  total: number;
+  currentPage: BookPage;
+  saving: 'idle' | 'pending' | 'saved';
+  uploading: boolean;
+  adding: boolean;
+  selectedPhotoId: string | null;
+  selectedOverlayId: string | null;
+  selectedSlotIndex: number;
+  addPagePickerOpen: boolean;
+  setAddPagePickerOpen: (v: boolean | ((x: boolean) => boolean)) => void;
+  mobileSheet: null | 'pages' | 'text' | 'layout' | 'theme';
+  setMobileSheet: (v: null | 'pages' | 'text' | 'layout' | 'theme') => void;
+  backToDetail: () => void;
+  onSetIndex: (i: number | ((x: number) => number)) => void;
+  onSelectPhoto: (id: string | null) => void;
+  onSelectOverlay: (id: string | null) => void;
+  onClearSelection: () => void;
+  onSetOverlays: (next: Overlay[]) => void;
+  onAdjustFocus: (
+    photoId: string,
+    info: {
+      dx: number;
+      dy: number;
+      containerW: number;
+      containerH: number;
+      naturalW: number;
+      naturalH: number;
+      startFocus: PhotoFocus;
+      zoom: number;
+    }
+  ) => void;
+  onTriggerUploadReplace: () => void;
+  onResetFocus: () => void;
+  patchCurrentPage: (patch: Partial<BookPage>) => void;
+  updateBook: (patch: Partial<Book> | ((prev: Book) => Book)) => void;
+  addOverlay: (kind: 'text' | 'photo') => void;
+  patchOverlay: (id: string, patch: Partial<Overlay>) => void;
+  removeOverlay: (id: string) => void;
+  addPageAfter: (afterIndex: number, layout?: PageLayoutType) => void;
+  deletePageAt: (target: number) => void;
+  movePage: (from: number, targetInsertIdx: number) => void;
+  changeLayout: (l: PageLayoutType) => void;
+  changeVariant: (v: string | undefined) => void;
+  replacePhotoAt: (slot: number, photoId: string) => void;
+  reshufflePagePhotos: (pickIds: string[]) => void;
+  setPhotoShape: (slot: number, shape: PhotoShape | undefined) => void;
+  handlePickFromLibrary: (photoId: string) => void;
+  handleDeletePhoto: (photoId: string) => void;
+  openAddPhotos: () => void;
+  dragFromIdx: number | null;
+  setDragFromIdx: (v: number | null) => void;
+  dragOverIdx: number | null;
+  setDragOverIdx: (v: number | null) => void;
+  fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  addPhotoInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  handleFileChosen: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleAddPhotosChosen: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const {
+    book,
+    template,
+    rawTemplate,
+    index,
+    total,
+    currentPage,
+    saving,
+    uploading,
+    adding,
+    selectedPhotoId,
+    selectedOverlayId,
+    selectedSlotIndex,
+    addPagePickerOpen,
+    setAddPagePickerOpen,
+    mobileSheet,
+    setMobileSheet,
+    backToDetail,
+    onSetIndex,
+    onSelectPhoto,
+    onSelectOverlay,
+    onClearSelection,
+    onSetOverlays,
+    onAdjustFocus,
+    onTriggerUploadReplace,
+    onResetFocus,
+    patchCurrentPage,
+    updateBook,
+    addOverlay,
+    patchOverlay,
+    removeOverlay,
+    addPageAfter,
+    deletePageAt,
+    movePage,
+    changeLayout,
+    changeVariant,
+    replacePhotoAt,
+    reshufflePagePhotos,
+    setPhotoShape,
+    handlePickFromLibrary,
+    handleDeletePhoto,
+    openAddPhotos,
+    dragFromIdx,
+    setDragFromIdx,
+    dragOverIdx,
+    setDragOverIdx,
+    fileInputRef,
+    addPhotoInputRef,
+    handleFileChosen,
+    handleAddPhotosChosen,
+  } = props;
+
+  function goPrev() {
+    onSetIndex((i) => Math.max(0, i - 1));
+    onClearSelection();
+  }
+  function goNext() {
+    onSetIndex((i) => Math.min(total - 1, i + 1));
+    onClearSelection();
+  }
+
+  // —— 触屏左右滑动翻页（在预览容器空白区生效） ——
+  // 注意：照片自身是「拖动调整画面位置」的交互，所以这里只在「容器空白区」
+  // 监听 touchstart / touchend，避免和 PageView 内部的拖动冲突。
+  const touchStart = useRef<{ x: number; y: number; t: number } | null>(null);
+  function onTouchStart(e: React.TouchEvent) {
+    // 只在背景层触发（不与照片拖动冲突）
+    if (e.target !== e.currentTarget) return;
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+  }
+  function onTouchEnd(e: React.TouchEvent) {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    const dt = Date.now() - start.t;
+    // 横滑距离够大、纵向相对小、时长不超过 800ms 视为左右翻页
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 800) {
+      if (dx < 0) goNext();
+      else goPrev();
+    }
+  }
+
+  return (
+    <div
+      className="editor-root flex flex-col bg-neutral-50"
+      style={{
+        // 用 100dvh 保证移动端浏览器底部地址栏收起时不会留白
+        height: '100dvh',
+      }}
+    >
+      {/* 顶栏（紧凑） */}
+      <div
+        className="shrink-0 border-b border-neutral-200 bg-white px-2 py-1.5 flex items-center gap-1 bb-safe-top"
+      >
+        <button
+          type="button"
+          onClick={backToDetail}
+          aria-label="返回"
+          className="w-9 h-9 rounded-full flex items-center justify-center text-neutral-600 active:bg-neutral-100"
+        >
+          ‹
+        </button>
+        <div className="flex-1 min-w-0 px-1">
+          <div className="font-display font-bold text-sm truncate">
+            {book.title}
+          </div>
+          <div className="text-[10px] text-neutral-500 truncate">
+            {template.name} · 第 {index + 1} / {total} 页
+            {saving === 'pending' && ' · 保存中…'}
+            {saving === 'saved' && ' · 已保存 ✓'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobileSheet('pages')}
+          className="px-2.5 h-9 rounded-full bg-neutral-100 text-neutral-700 text-xs active:bg-neutral-200 flex items-center gap-1"
+        >
+          📄 页面
+        </button>
+        <button
+          type="button"
+          onClick={backToDetail}
+          className="px-3 h-9 rounded-full bg-rose text-white text-xs active:brightness-95"
+        >
+          完成
+        </button>
+      </div>
+
+      {/* 中央预览区：占满剩余空间 */}
+      <section
+        className="flex-1 min-h-0 relative flex items-center justify-center overflow-hidden"
+        style={{ background: template.colors.bg }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClearSelection();
+        }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
+        {/* 预览主体：用 max 宽高 + aspect-ratio 自适应；
+            上下留出空间放浮动按钮和提示。 */}
+        <div
+          className="relative"
+          style={{
+            // 在保证 3/4 比例的前提下尽可能大
+            maxWidth: 'min(92vw, calc((100dvh - 200px) * 3 / 4))',
+            width: '100%',
+            aspectRatio: '3 / 4',
+            margin: '0 auto',
+          }}
+        >
+          <PageView
+            page={currentPage}
+            photos={book.photos}
+            template={template}
+            babyName={book.babyName}
+            dateRange={book.dateRange}
+            onSelectPhoto={onSelectPhoto}
+            selectedPhotoId={selectedPhotoId}
+            photoFrameColor={book.theme?.photoFrameColor ?? null}
+            onAdjustFocus={onAdjustFocus}
+            overlays={currentPage.overlays}
+            selectedOverlayId={selectedOverlayId}
+            onSelectOverlay={onSelectOverlay}
+            onOverlaysChange={onSetOverlays}
+          />
+        </div>
+
+        {/* 左右翻页按钮 */}
+        {index > 0 && (
+          <button
+            type="button"
+            onClick={goPrev}
+            aria-label="上一页"
+            className="absolute left-1.5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/85 backdrop-blur shadow-md text-xl text-neutral-700 active:bg-white flex items-center justify-center"
+          >
+            ‹
+          </button>
+        )}
+        {index < total - 1 && (
+          <button
+            type="button"
+            onClick={goNext}
+            aria-label="下一页"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/85 backdrop-blur shadow-md text-xl text-neutral-700 active:bg-white flex items-center justify-center"
+          >
+            ›
+          </button>
+        )}
+
+        {/* 选中态浮条：底部居中 */}
+        {selectedPhotoId && selectedSlotIndex >= 0 && (
+          <div className="absolute left-2 right-2 bottom-2 flex justify-center pointer-events-none">
+            <div className="pointer-events-auto inline-flex items-center gap-1.5 bg-white rounded-full shadow-lg border border-neutral-200 pl-2.5 pr-1 py-1 max-w-full overflow-x-auto whitespace-nowrap">
+              <span className="text-[11px] text-neutral-500 shrink-0">
+                第 <b className="text-rose">{selectedSlotIndex + 1}</b> 张 · 拖动调整位置
+              </span>
+              <button
+                type="button"
+                onClick={onTriggerUploadReplace}
+                className="text-[11px] px-2.5 py-1 rounded-full bg-rose text-white active:brightness-95 shrink-0"
+              >
+                ↑ 替换
+              </button>
+              {currentPage.photoFocus?.[selectedSlotIndex] && (
+                <button
+                  type="button"
+                  onClick={onResetFocus}
+                  className="text-[11px] px-2 py-1 rounded-full bg-neutral-100 text-neutral-700 shrink-0"
+                >
+                  重置
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClearSelection}
+                className="text-[11px] px-2 py-1 rounded-full text-neutral-500 shrink-0"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+
+        {uploading && (
+          <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center text-sm text-neutral-700 pointer-events-auto">
+            <div className="px-4 py-2 rounded-full bg-white shadow border border-neutral-200">
+              正在处理图片…
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 底部 Tab Bar */}
+      <nav
+        className="shrink-0 border-t border-neutral-200 bg-white grid grid-cols-4 bb-safe-bottom"
+      >
+        {[
+          { key: 'pages', label: '页面', emoji: '📄' },
+          { key: 'text', label: '文字', emoji: '📝' },
+          { key: 'layout', label: '排版', emoji: '🖼️' },
+          { key: 'theme', label: '主题', emoji: '🎨' },
+        ].map((it) => {
+          const active = mobileSheet === it.key;
+          return (
+            <button
+              key={it.key}
+              type="button"
+              onClick={() =>
+                setMobileSheet(active ? null : (it.key as typeof mobileSheet))
+              }
+              className={`flex flex-col items-center justify-center py-1.5 text-[11px] gap-0.5 transition ${
+                active ? 'text-rose' : 'text-neutral-500'
+              }`}
+            >
+              <span className="text-lg leading-none">{it.emoji}</span>
+              <span>{it.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* —— 抽屉：页面缩略图 —— */}
+      <BottomSheet
+        open={mobileSheet === 'pages'}
+        onClose={() => setMobileSheet(null)}
+        title="页面"
+        maxHeight="80dvh"
+        headerExtra={
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAddPagePickerOpen((v) => !v)}
+              className="px-2.5 py-1 rounded-full bg-rose/10 text-rose text-xs"
+            >
+              + 新增
+            </button>
+            {addPagePickerOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-[120]"
+                  onClick={() => setAddPagePickerOpen(false)}
+                />
+                <div className="absolute z-[121] right-0 mt-2 w-[260px] bg-white border border-neutral-200 rounded-lg shadow-xl p-2">
+                  <div className="text-[11px] text-neutral-500 mb-1.5 px-1">
+                    选择版式（插入到第 {index + 1} 页后）
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {LAYOUT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          addPageAfter(index, opt.value);
+                          setAddPagePickerOpen(false);
+                          // 跳到新页后保留抽屉，便于继续看
+                        }}
+                        className="flex flex-col items-center gap-0.5 py-1.5 rounded-md border border-neutral-200 active:bg-rose/5 text-[10px] text-neutral-700"
+                        title={opt.label}
+                      >
+                        <LayoutIcon layout={opt.value} active={false} />
+                        <span>{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        }
+      >
+        <div className="px-3 py-3">
+          <div className="grid grid-cols-3 gap-2">
+            {book.pages.map((p, i) => {
+              const isCurrent = i === index;
+              return (
+                <div key={p.id} className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSetIndex(i);
+                      setMobileSheet(null);
+                    }}
+                    className={`block w-full relative rounded-md overflow-hidden border-2 transition ${
+                      isCurrent
+                        ? 'border-rose ring-2 ring-rose/20'
+                        : 'border-transparent active:border-neutral-300'
+                    }`}
+                    style={{ aspectRatio: '3 / 4' }}
+                  >
+                    <PageView
+                      page={p}
+                      photos={book.photos}
+                      template={template}
+                      babyName={book.babyName}
+                      dateRange={book.dateRange}
+                      photoFrameColor={book.theme?.photoFrameColor ?? null}
+                    />
+                    <span className="absolute top-0.5 left-1 text-[10px] bg-black/50 text-white rounded px-1">
+                      {i + 1}
+                    </span>
+                  </button>
+                  {/* 触屏：左移 / 右移 / 删除 控件常驻显示 */}
+                  <div className="mt-1 flex items-center justify-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => i > 0 && movePage(i, i - 1)}
+                      disabled={i === 0}
+                      aria-label="上移"
+                      className="w-7 h-7 rounded-full bg-neutral-100 text-neutral-600 text-xs active:bg-neutral-200 disabled:opacity-30"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => i < total - 1 && movePage(i, i + 2)}
+                      disabled={i >= total - 1}
+                      aria-label="下移"
+                      className="w-7 h-7 rounded-full bg-neutral-100 text-neutral-600 text-xs active:bg-neutral-200 disabled:opacity-30"
+                    >
+                      ›
+                    </button>
+                    {total > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => deletePageAt(i)}
+                        aria-label="删除"
+                        className="w-7 h-7 rounded-full bg-rose/10 text-rose text-xs active:bg-rose/20"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* 拖拽排序状态在移动端不会触发，仅作用于桌面端；这里隐式忽略 */}
+          {(dragFromIdx != null || dragOverIdx != null) && (
+            <div className="mt-2 text-[10px] text-neutral-400">
+              {/* 占位：仅为消除未读 props 的 lint 警告 */}
+              {String(setDragFromIdx === setDragOverIdx)}
+            </div>
+          )}
+        </div>
+      </BottomSheet>
+
+      {/* —— 抽屉：文字 —— */}
+      <BottomSheet
+        open={mobileSheet === 'text'}
+        onClose={() => setMobileSheet(null)}
+        title="文字"
+      >
+        <div className="px-4 py-3">
+          <TextTab
+            page={currentPage}
+            template={template}
+            book={book}
+            rawTemplate={rawTemplate}
+            pageNumber={index + 1}
+            totalPages={total}
+            onPagePatch={patchCurrentPage}
+            onBookPatch={(p) => updateBook(p)}
+            selectedOverlayId={selectedOverlayId}
+            onSelectOverlay={onSelectOverlay}
+            onAddOverlay={addOverlay}
+            onPatchOverlay={patchOverlay}
+            onRemoveOverlay={removeOverlay}
+          />
+        </div>
+      </BottomSheet>
+
+      {/* —— 抽屉：排版 —— */}
+      <BottomSheet
+        open={mobileSheet === 'layout'}
+        onClose={() => setMobileSheet(null)}
+        title="排版"
+      >
+        <div className="px-4 py-3">
+          <LayoutTab
+            book={book}
+            page={currentPage}
+            onChangeLayout={changeLayout}
+            onChangeVariant={changeVariant}
+            onReplacePhotoAt={replacePhotoAt}
+            onReshuffle={reshufflePagePhotos}
+            onChangeShape={setPhotoShape}
+            selectedPhotoId={selectedPhotoId}
+            canReplace={selectedSlotIndex >= 0}
+            adding={adding}
+            onPickFromLibrary={handlePickFromLibrary}
+            onDeletePhoto={handleDeletePhoto}
+            onAddPhotos={openAddPhotos}
+            overlays={currentPage.overlays ?? []}
+            selectedOverlayId={selectedOverlayId}
+            onSelectOverlay={onSelectOverlay}
+            onAddOverlay={addOverlay}
+            onPatchOverlay={patchOverlay}
+            onRemoveOverlay={removeOverlay}
+          />
+        </div>
+      </BottomSheet>
+
+      {/* —— 抽屉：主题 —— */}
+      <BottomSheet
+        open={mobileSheet === 'theme'}
+        onClose={() => setMobileSheet(null)}
+        title="主题"
+      >
+        <div className="px-4 py-3">
+          <ThemeTab
+            book={book}
+            rawTemplate={rawTemplate}
+            onBookPatch={(p) => updateBook(p)}
+          />
+        </div>
+      </BottomSheet>
+
+      {/* 隐藏 file input（与桌面分支同写法）。
+          注意：这里不能用 display:none / pointer-events:none，
+          否则 iOS Safari、微信 WebView 会吞掉 .click() 调用。 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/*"
+        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }}
+        onChange={handleFileChosen}
+      />
+      <input
+        ref={addPhotoInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/*"
+        multiple
+        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }}
         onChange={handleAddPhotosChosen}
       />
     </div>
