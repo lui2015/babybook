@@ -23,6 +23,9 @@ export function BookDetailPage() {
   const pageRef = useRef<HTMLDivElement>(null);
   const fullscreenRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // 是否对画册做 90° 旋转（仅手机伪全屏 + 物理竖屏时为 true）。
+  // 画册是 3:2 横向对开，手机原生竖屏直接全屏会很扁，旋转后视觉上变成横屏铺满。
+  const [rotateForFullscreen, setRotateForFullscreen] = useState(false);
 
   // 监听原生全屏状态（处理 ESC 退出 / 浏览器自身退出）
   // 注意：iOS Safari 不支持 Element.requestFullscreen（document.fullscreenElement 永远是 undefined），
@@ -71,10 +74,20 @@ export function BookDetailPage() {
         }
       }
       setIsFullscreen(false);
+      setRotateForFullscreen(false);
       return;
     }
 
     // —— 进入 —— //
+    // 旋转条件判定（仅在「进入瞬间」决定一次，后续 orientationchange 会动态再算）：
+    //  1) 视口当前是「竖屏」：宽 < 高
+    //  2) 是「窄屏 / 触屏设备」：宽度 < 768px（避免桌面竖屏显示器误判）
+    const shouldRotate =
+      typeof window !== 'undefined' &&
+      window.innerWidth < window.innerHeight &&
+      window.innerWidth < 768;
+    setRotateForFullscreen(shouldRotate);
+
     // 优先尝试浏览器原生 Fullscreen API（桌面 Chrome / Edge / 安卓 Chrome 都支持）。
     // iOS Safari 上 el.requestFullscreen 是 undefined，直接走 CSS 伪全屏分支。
     const requestFn =
@@ -98,6 +111,24 @@ export function BookDetailPage() {
     // 兜底：CSS 伪全屏（iOS Safari 唯一可用方案）
     setIsFullscreen(true);
   }
+
+  // 全屏过程中用户旋转手机：动态调整 rotate 标志
+  // - 用户从竖屏转到横屏：取消旋转（让 orientation 自然铺满）
+  // - 用户从横屏转回竖屏（窄屏）：重新启用旋转
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onResize = () => {
+      const shouldRotate =
+        window.innerWidth < window.innerHeight && window.innerWidth < 768;
+      setRotateForFullscreen(shouldRotate);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, [isFullscreen]);
 
   // 加载画册
   useEffect(() => {
@@ -340,21 +371,29 @@ export function BookDetailPage() {
       {/* 主视图（使用共用翻页组件）—— 同时作为全屏容器 */}
       <div
         ref={fullscreenRef}
-        className={`no-print book-stage-wrap ${isFullscreen ? 'is-fullscreen' : ''}`}
+        className={`no-print book-stage-wrap ${isFullscreen ? 'is-fullscreen' : ''} ${
+          isFullscreen && rotateForFullscreen ? 'is-fullscreen-rotated' : ''
+        }`}
         onDoubleClick={() => {
           if (isFullscreen) return; // 全屏下双击不进编辑器，避免误触
           navigate(`/book/${book!.id}/edit`);
         }}
         title={isFullscreen ? '' : '双击进入编辑器'}
       >
-        <BookFlip
-          book={book}
-          template={template}
-          index={index}
-          onIndexChange={setIndex}
-          stageRef={pageRef}
-          minStageHeight="60vh"
-        />
+        {/* 旋转层：仅在 .is-fullscreen-rotated 下生效；非旋转模式时 .rotate-layer 是恒等变换。
+            把 BookFlip 套在这一层里，避免旋转影响外层的退出按钮定位。 */}
+        <div className="rotate-layer">
+          <BookFlip
+            book={book}
+            template={template}
+            index={index}
+            onIndexChange={setIndex}
+            stageRef={pageRef}
+            minStageHeight="60vh"
+            // 旋转模式下，用户视觉上的横向滑对应物理纵向滑，需要把 swipe 轴切到 y。
+            swipeAxis={isFullscreen && rotateForFullscreen ? 'y' : 'x'}
+          />
+        </div>
         {isFullscreen && (
           <button
             type="button"
@@ -516,6 +555,51 @@ const FULLSCREEN_CSS = `
 .book-stage-wrap:fullscreen .bookflip-stage,
 .book-stage-wrap.is-fullscreen .bookflip-stage {
   max-width: min(96vw, calc((100vh - 110px) * 1.5)) !important;
+}
+
+/* —— 手机伪全屏「旋转 90°」模式 —— //
+ * iOS Safari 不支持 Screen Orientation lock，所以我们用 CSS transform 把画册旋转 90°，
+ * 视觉上变成横屏铺满。
+ *
+ * 实现要点：
+ *  1) 外层 .book-stage-wrap.is-fullscreen 已经是 position:fixed; inset:0; 100vw × 100dvh。
+ *  2) 内层 .rotate-layer 旋转 90°：
+ *     - 旋转后的逻辑「宽」= 视口高（100dvh），逻辑「高」= 视口宽（100vw）。
+ *     - transform-origin: top left + translate(0, 100vw) 把旋转出去的内容拉回视口。
+ *  3) 内部 .bookflip-stage 的 max-width 改用「视口高度」推算（旋转后画册的可用宽是 100dvh）。
+ *  4) 退出按钮（.fs-exit-btn）不在 .rotate-layer 里，所以仍然在视觉右上角，不受旋转影响。
+ */
+.book-stage-wrap.is-fullscreen-rotated {
+  /* 容器自身保持 100vw × 100dvh 不变，旋转交给内层处理 */
+  overflow: hidden;
+}
+.book-stage-wrap.is-fullscreen-rotated .rotate-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100dvh;
+  /* iOS 旧版本 dvh 不支持时回退 */
+  width: 100vh;
+  width: 100dvh;
+  height: 100vw;
+  transform-origin: top left;
+  /* 先旋转 90°，再向下平移 100vw 把画面拉回视口（旋转把内容甩到 y < 0 的位置了） */
+  transform: rotate(90deg) translate(0, -100vw);
+  /* 让旋转后的 BookFlip 内容（flex 布局）能够正常居中 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 旋转后画册可用宽度 = 旋转层 width = 100dvh；可用高度 = 旋转层 height = 100vw。
+   3:2 反推：宽度上限 = min(96 * dvh, (100vw - 110px) * 1.5)。
+   注意：这里 css 计算单位是「旋转层内的本地坐标」，所以直接用 vh/vw 即可。 */
+.book-stage-wrap.is-fullscreen-rotated .bookflip-stage {
+  max-width: min(96vh, calc((100vw - 110px) * 1.5)) !important;
+}
+/* 旋转模式下，BookFlip 根节点也要撑满旋转层 */
+.book-stage-wrap.is-fullscreen-rotated .rotate-layer > * {
+  width: 100%;
+  max-width: 100%;
 }
 /* 全屏下隐藏缩略图条（BookFlip 根节点里以 scrollbar-hide 为标识的横向滚动条） */
 .book-stage-wrap:fullscreen [class*="scrollbar-hide"],

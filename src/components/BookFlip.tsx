@@ -18,6 +18,12 @@ interface Props {
   minStageHeight?: string;
   /** 翻页动画时长 ms，默认 850 */
   flipDuration?: number;
+  /**
+   * 触摸滑动翻页用哪个轴（'x' 默认 = 横向滑动；'y' = 纵向滑动）。
+   * 用于「BookDetailPage 手机伪全屏」会把整个 BookFlip rotate(90deg)，
+   * 旋转后用户视觉上的「左右滑动」对应物理「上下滑动」（clientX 不变、clientY 在变）。
+   */
+  swipeAxis?: 'x' | 'y';
 }
 
 /**
@@ -61,9 +67,11 @@ export function BookFlip({
   bgColor,
   minStageHeight = '60vh',
   flipDuration = 850,
+  swipeAxis = 'x',
 }: Props) {
   const total = book.pages.length;
-  const touchStartX = useRef<number | null>(null);
+  // 触摸起点：根据 swipeAxis 取 clientX 或 clientY
+  const touchStartPos = useRef<number | null>(null);
 
   /** 把单页索引对齐到对开组的左页（偶数） */
   const alignSpread = useCallback((i: number) => {
@@ -237,14 +245,23 @@ export function BookFlip({
           minHeight: minStageHeight,
         }}
         onTouchStart={(e) => {
-          touchStartX.current = e.touches[0]?.clientX ?? null;
+          const t = e.touches[0];
+          if (!t) {
+            touchStartPos.current = null;
+            return;
+          }
+          touchStartPos.current = swipeAxis === 'y' ? t.clientY : t.clientX;
         }}
         onTouchEnd={(e) => {
-          if (touchStartX.current == null) return;
-          const dx = (e.changedTouches[0]?.clientX ?? 0) - touchStartX.current;
-          touchStartX.current = null;
-          if (Math.abs(dx) < 40) return;
-          flipSpread(dx < 0 ? 1 : -1);
+          if (touchStartPos.current == null) return;
+          const t = e.changedTouches[0];
+          const end = t ? (swipeAxis === 'y' ? t.clientY : t.clientX) : 0;
+          const d = end - touchStartPos.current;
+          touchStartPos.current = null;
+          if (Math.abs(d) < 40) return;
+          // d < 0 表示「向起点的反方向滑」：横向是「左滑→下一页」；
+          // 纵向（旋转 90° 后）也是「视觉上左滑 = 物理上滑 = clientY 减小」→ 同样是下一页。
+          flipSpread(d < 0 ? 1 : -1);
         }}
       >
         {/*
