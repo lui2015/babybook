@@ -548,13 +548,34 @@ const FULLSCREEN_CSS = `
    一旦外层强行 flex 居中或 100vh，就会把对开页压成一条。
    这里我们只通过 .bookflip-stage 这个对开舞台自己来撑大尺寸。 */
 
-/* 全屏下让翻书舞台按视口高度反推宽度，保证对开 3:2 完整可见：
-   - 高度上限：减去外层 padding（p-4/p-8） + 页码一行 ≈ 110px（缩略图条已隐藏，不再扣它的高）
-   - 宽度上限：96vw
-   取两者最小值，再乘 1.5（3:2 = 宽:高）反推宽度 */
+/* —— 全屏下隐藏缩略图条 + 页码（铺满优先，简化 UI） —— //
+ * 不论是原生全屏、CSS 伪全屏还是旋转模式，都隐藏缩略图条；
+ * 页码会被退出按钮替代信息——保留也意义不大，干脆全屏下隐藏，把所有空间留给画册。 */
+.book-stage-wrap:fullscreen [class*="scrollbar-hide"],
+.book-stage-wrap.is-fullscreen [class*="scrollbar-hide"] {
+  display: none !important;
+}
+/* 全屏下也隐藏页码（释放高度给画册铺满） */
+.book-stage-wrap:fullscreen .bookflip-pageno,
+.book-stage-wrap.is-fullscreen .bookflip-pageno {
+  display: none !important;
+}
+/* 全屏下移除 BookFlip 主视图卡片自身的 padding/圆角（避免边距吃掉空间） */
+.book-stage-wrap:fullscreen .bookflip-card,
+.book-stage-wrap.is-fullscreen .bookflip-card {
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  min-height: 0 !important;
+}
+
+/* 全屏下让翻书舞台按视口尺寸反推宽度，保证对开 3:2 完整可见：
+   - 桌面 / 安卓原生全屏（未旋转）：宽度上限 = min(98vw, 视口高度 * 1.5)
+   取两者最小值，让画册尽量大同时不溢出 */
 .book-stage-wrap:fullscreen .bookflip-stage,
-.book-stage-wrap.is-fullscreen .bookflip-stage {
-  max-width: min(96vw, calc((100vh - 110px) * 1.5)) !important;
+.book-stage-wrap.is-fullscreen:not(.is-fullscreen-rotated) .bookflip-stage {
+  max-width: min(98vw, calc(100vh * 1.5)) !important;
+  max-width: min(98vw, calc(100dvh * 1.5)) !important;
 }
 
 /* —— 手机伪全屏「旋转 90°」模式 —— //
@@ -563,11 +584,13 @@ const FULLSCREEN_CSS = `
  *
  * 实现要点：
  *  1) 外层 .book-stage-wrap.is-fullscreen 已经是 position:fixed; inset:0; 100vw × 100dvh。
- *  2) 内层 .rotate-layer 旋转 90°：
- *     - 旋转后的逻辑「宽」= 视口高（100dvh），逻辑「高」= 视口宽（100vw）。
- *     - transform-origin: top left + translate(0, 100vw) 把旋转出去的内容拉回视口。
- *  3) 内部 .bookflip-stage 的 max-width 改用「视口高度」推算（旋转后画册的可用宽是 100dvh）。
- *  4) 退出按钮（.fs-exit-btn）不在 .rotate-layer 里，所以仍然在视觉右上角，不受旋转影响。
+ *  2) 内层 .rotate-layer 自身是 100dvh × 100vw 的"逻辑横屏画布"，
+ *     用 transform: rotate(90deg) translate(0, -100vw) + transform-origin: top left
+ *     把它旋转到与物理视口对齐。
+ *  3) 旋转层内部用 flex 居中 BookFlip，BookFlip 各层都不再有 padding，
+ *     '.bookflip-stage' 的 max-width 用 vh/vw（注意：这层内的 vh/vw 仍是物理视口的，
+ *     旋转后视觉上对应物理 vh = 旋转层 width，物理 vw = 旋转层 height）。
+ *  4) 退出按钮（.fs-exit-btn）不在 .rotate-layer 里，仍然在视觉右上角，不受旋转影响。
  */
 .book-stage-wrap.is-fullscreen-rotated {
   /* 容器自身保持 100vw × 100dvh 不变，旋转交给内层处理 */
@@ -577,39 +600,42 @@ const FULLSCREEN_CSS = `
   position: absolute;
   top: 0;
   left: 0;
-  width: 100dvh;
-  /* iOS 旧版本 dvh 不支持时回退 */
-  width: 100vh;
+  /* 旋转层尺寸 = 旋转后视觉的"宽×高" */
+  width: 100vh;       /* 旧浏览器回退 */
   width: 100dvh;
   height: 100vw;
   transform-origin: top left;
-  /* 先旋转 90°，再向下平移 100vw 把画面拉回视口（旋转把内容甩到 y < 0 的位置了） */
+  /* 顺时针旋转 90°，再把内容平移回视口（rotate 后 y 变成 -100vw 起点） */
   transform: rotate(90deg) translate(0, -100vw);
-  /* 让旋转后的 BookFlip 内容（flex 布局）能够正常居中 */
+  /* 内部用 flex 居中并铺满 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+/* 旋转层下 BookFlip 根（一个普通的 div，包含 style + 主视图 + 页码 + 缩略图条）：
+   - 显式 100% 宽高
+   - 用 flex 让主视图卡片('.bookflip-card')居中并占满 */
+.book-stage-wrap.is-fullscreen-rotated .rotate-layer > div {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-/* 旋转后画册可用宽度 = 旋转层 width = 100dvh；可用高度 = 旋转层 height = 100vw。
-   3:2 反推：宽度上限 = min(96 * dvh, (100vw - 110px) * 1.5)。
-   注意：这里 css 计算单位是「旋转层内的本地坐标」，所以直接用 vh/vw 即可。 */
+/* 主视图卡片在旋转模式下：去掉 padding/min-height，撑满旋转层（前面已有通用规则会把
+   .bookflip-card 的 padding/bg/min-height 抹平，这里再保证 width/height 铺满） */
+.book-stage-wrap.is-fullscreen-rotated .bookflip-card {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* 旋转后画册可用宽度 = 物理视口高度（100vh / 100dvh），可用高度 = 物理视口宽度（100vw）。
+   3:2 反推：宽度上限 = min(98 * dvh, 100vw * 1.5)。 */
 .book-stage-wrap.is-fullscreen-rotated .bookflip-stage {
-  max-width: min(96vh, calc((100vw - 110px) * 1.5)) !important;
-}
-/* 旋转模式下，BookFlip 根节点也要撑满旋转层 */
-.book-stage-wrap.is-fullscreen-rotated .rotate-layer > * {
-  width: 100%;
-  max-width: 100%;
-}
-/* 全屏下隐藏缩略图条（BookFlip 根节点里以 scrollbar-hide 为标识的横向滚动条） */
-.book-stage-wrap:fullscreen [class*="scrollbar-hide"],
-.book-stage-wrap.is-fullscreen [class*="scrollbar-hide"] {
-  display: none !important;
-}
-/* 全屏下页码文字反白，避免黑底看不清 */
-.book-stage-wrap:fullscreen .text-neutral-600,
-.book-stage-wrap.is-fullscreen .text-neutral-600 {
-  color: #e5e5e5 !important;
+  max-width: min(98vh, calc(100vw * 1.5)) !important;
+  max-width: min(98dvh, calc(100vw * 1.5)) !important;
+  /* 同时保证宽度真的撑到上限（默认 max-w-3xl 被覆盖，再加 width: 100%） */
+  width: 100% !important;
 }
 /* 退出全屏按钮（仅在全屏时显示） */
 .fs-exit-btn {

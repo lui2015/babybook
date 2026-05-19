@@ -239,7 +239,8 @@ export function BookFlip({
       <div
         // 手机端把外层 padding 收紧到 p-2，让出更多空间给相册本身；
         // sm 以上恢复 p-8 留出舒服的边距。
-        className="rounded-2xl sm:rounded-3xl p-2 sm:p-8 flex items-center justify-center select-none relative"
+        // .bookflip-card 是给「全屏铺满」场景的钩子类（外部 CSS 会覆盖它的 padding/bg/圆角）
+        className="bookflip-card rounded-2xl sm:rounded-3xl p-2 sm:p-8 flex items-center justify-center select-none relative"
         style={{
           background: bgColor ?? template.colors.bg,
           minHeight: minStageHeight,
@@ -396,7 +397,7 @@ export function BookFlip({
       </div>
 
       {/* 页码：对开页码 + 单页位置 */}
-      <div className="text-center mt-3 text-sm text-neutral-600">
+      <div className="bookflip-pageno text-center mt-3 text-sm text-neutral-600">
         第 {currentSpreadNo + 1} / {totalSpreads} 跨页
         <span className="mx-2 text-neutral-300">·</span>
         {index + 1} / {total} 页
