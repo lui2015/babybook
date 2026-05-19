@@ -8,6 +8,7 @@ import { PageView } from '../components/PageView';
 import { BookFlip } from '../components/BookFlip';
 import { exportBookToPdf } from '../exportPdf';
 import { applyBookTheme } from '../bookTheme';
+import { saveFile, dataUrlToBlob, isMobileLike } from '../utils/saveFile';
 import type { Book } from '../types';
 
 export function BookDetailPage() {
@@ -122,7 +123,7 @@ export function BookDetailPage() {
         useCORS: true,
       });
       const url = canvas.toDataURL('image/png');
-      downloadDataUrl(url, `${book!.title}-第${index + 1}页.png`);
+      await downloadDataUrl(url, `${book!.title}-第${index + 1}页.png`);
     } finally {
       setExporting(false);
       setExportHint(null);
@@ -174,7 +175,7 @@ export function BookDetailPage() {
       });
       document.body.removeChild(container);
       const url = canvas.toDataURL('image/png');
-      downloadDataUrl(url, `${book!.title}-长图.png`);
+      await downloadDataUrl(url, `${book!.title}-长图.png`);
     } catch (e) {
       console.error(e);
       alert('导出失败，请重试');
@@ -187,10 +188,31 @@ export function BookDetailPage() {
   async function exportPdf() {
     setExporting(true);
     setExportHint(`正在生成 PDF（0/${total}）…`);
+    // 移动端：把保存阶段的提示信息延迟到生成完后再 alert，避免遮挡
+    let pendingNotice: string | null = null;
     try {
-      await exportBookToPdf(book!, template, (done, t) => {
-        setExportHint(`正在生成 PDF（${done}/${t}）…`);
-      });
+      const result = await exportBookToPdf(
+        book!,
+        template,
+        (done, t) => {
+          setExportHint(`正在生成 PDF（${done}/${t}）…`);
+        },
+        (msg) => {
+          // saveFile 给的提示（如"右上角分享 → 存储到文件"）
+          pendingNotice = msg;
+        },
+      );
+      // 根据保存结果给出最终反馈
+      if (result.kind === 'wechat-blocked') {
+        alert(
+          '当前为微信/QQ 内置浏览器，无法直接下载 PDF。\n请点击右上角「···」→「在浏览器打开」后再点击下载。',
+        );
+      } else if (result.kind === 'failed') {
+        alert('PDF 保存失败，请稍后重试或在浏览器中打开本页面。');
+      } else if (pendingNotice) {
+        // 通常是"在新窗口打开了 PDF，请右上角分享 → 存储到文件"
+        alert(pendingNotice);
+      }
     } catch (e) {
       console.error(e);
       alert('PDF 生成失败，请重试');
@@ -348,10 +370,42 @@ function ToolBtn({
 }
 
 function downloadDataUrl(url: string, filename: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
+  // 桌面：直接 a.download。
+  // 移动端：把 dataURL 转 Blob 走 saveFile（Web Share / 新窗口打开 / 微信提示）。
+  if (!isMobileLike()) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    return Promise.resolve();
+  }
+  return saveDataUrlOnMobile(url, filename);
+}
+
+async function saveDataUrlOnMobile(url: string, filename: string): Promise<void> {
+  let pendingNotice: string | null = null;
+  try {
+    const blob = dataUrlToBlob(url);
+    const result = await saveFile({
+      blob,
+      filename,
+      notify: (msg) => {
+        pendingNotice = msg;
+      },
+    });
+    if (result.kind === 'wechat-blocked') {
+      alert(
+        '当前为微信/QQ 内置浏览器，无法直接下载图片。\n请点击右上角「···」→「在浏览器打开」后再尝试。',
+      );
+    } else if (result.kind === 'failed') {
+      alert('图片保存失败，请稍后重试。');
+    } else if (pendingNotice) {
+      alert(pendingNotice);
+    }
+  } catch (e) {
+    console.error(e);
+    alert('图片保存失败，请稍后重试。');
+  }
 }
 
 function formatDate(ts: number) {

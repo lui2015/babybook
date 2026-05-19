@@ -4,6 +4,7 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { PageView } from './components/PageView';
 import type { Book, Template } from './types';
+import { saveFile, type SaveFileResult } from './utils/saveFile';
 
 /**
  * 将整本画册导出为多页 PDF（贴近印刷质量）。
@@ -22,12 +23,20 @@ import type { Book, Template } from './types';
  *    backdrop-filter / 阴影等都能稳住；失败时 fallback 到 html2canvas（scale=3）。
  *  - PNG + jsPDF 'NONE' 压缩，最大限度保质（代价是 PDF 更大，但印刷场景值得）。
  *  - PDF 页面按画册 3:4 比例 210×280mm 自定义，不再强塞 A4 留大片白边。
+ *  - 保存阶段不再直接 pdf.save()（移动端 iOS Safari / 微信 WebView 会失效），
+ *    改为输出 Blob，统一交给 saveFile 工具：桌面 a.download；移动端优先 Web Share，
+ *    其次新窗口打开 Blob 让用户手动保存。
  */
 export async function exportBookToPdf(
   book: Book,
   template: Template,
   onProgress?: (done: number, total: number) => void,
-): Promise<void> {
+  /**
+   * 保存阶段需要给用户的提示（例如移动端在新窗口打开后告诉他"右上角分享 → 存储到文件"）。
+   * 不传则静默；UI 层应传入一个 toast/alert。
+   */
+  notify?: (msg: string) => void,
+): Promise<SaveFileResult> {
   // ———— 1. 离屏挂载容器 ————
   // 保持与预览一致的 CSS 尺寸；真正决定清晰度的是后面的 pixelRatio=3。
   const RENDER_W = 720;
@@ -101,7 +110,17 @@ export async function exportBookToPdf(
       onProgress?.(i + 1, pageEls.length);
     }
 
-    pdf.save(`${book.title}.pdf`);
+    // 生成 Blob，再统一交给 saveFile 处理跨端保存：
+    //   - 桌面：a.download 触发原生下载
+    //   - 移动端：优先 Web Share（系统级"存储到文件 / 发送 / 保存到相册"），
+    //            否则新窗口打开 Blob 让用户手动保存
+    //   - 微信/QQ WebView：提示用户用外部浏览器打开
+    const blob = pdf.output('blob');
+    return await saveFile({
+      blob,
+      filename: `${book.title}.pdf`,
+      notify,
+    });
   } finally {
     // 清理 React 根 + DOM
     roots.forEach((r) => r.unmount());
