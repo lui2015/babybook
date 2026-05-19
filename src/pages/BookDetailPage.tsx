@@ -24,27 +24,79 @@ export function BookDetailPage() {
   const fullscreenRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // 监听全屏状态（处理 ESC 退出 / 浏览器自身退出）
+  // 监听原生全屏状态（处理 ESC 退出 / 浏览器自身退出）
+  // 注意：iOS Safari 不支持 Element.requestFullscreen（document.fullscreenElement 永远是 undefined），
+  // 这里只能用来同步「桌面 Chrome / 安卓 Chrome」的原生全屏退出。
   useEffect(() => {
     const onChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      // 只有从原生全屏退出时才把状态置回 false；进入则由 toggleFullscreen 自己置 true。
+      if (!document.fullscreenElement) setIsFullscreen(false);
     };
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // iOS Safari 伪全屏时，监听 ESC（外接键盘）/ 安卓返回键 popstate 也算退出
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen]);
+
+  // 进入伪全屏时锁定 body 滚动，退出时解锁
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isFullscreen]);
+
   async function toggleFullscreen() {
     const el = fullscreenRef.current;
     if (!el) return;
-    try {
-      if (!document.fullscreenElement) {
-        await el.requestFullscreen({ navigationUI: 'hide' } as FullscreenOptions);
-      } else {
-        await document.exitFullscreen();
+
+    // —— 退出 —— //
+    if (isFullscreen) {
+      // 如果当前在原生全屏里，调用浏览器 API 退出；否则直接关 CSS 伪全屏
+      if (document.fullscreenElement && document.exitFullscreen) {
+        try {
+          await document.exitFullscreen();
+        } catch (e) {
+          console.error('exitFullscreen failed', e);
+        }
       }
-    } catch (e) {
-      console.error('fullscreen toggle failed', e);
+      setIsFullscreen(false);
+      return;
     }
+
+    // —— 进入 —— //
+    // 优先尝试浏览器原生 Fullscreen API（桌面 Chrome / Edge / 安卓 Chrome 都支持）。
+    // iOS Safari 上 el.requestFullscreen 是 undefined，直接走 CSS 伪全屏分支。
+    const requestFn =
+      el.requestFullscreen ||
+      // @ts-expect-error - 兼容老 Webkit
+      el.webkitRequestFullscreen ||
+      // @ts-expect-error - 兼容旧 Edge
+      el.msRequestFullscreen;
+
+    if (typeof requestFn === 'function') {
+      try {
+        await requestFn.call(el, { navigationUI: 'hide' } as FullscreenOptions);
+        setIsFullscreen(true);
+        return;
+      } catch (e) {
+        // 被用户拒绝 / 当前文档不允许 → 静默回退 CSS 伪全屏
+        console.warn('native fullscreen failed, falling back to css', e);
+      }
+    }
+
+    // 兜底：CSS 伪全屏（iOS Safari 唯一可用方案）
+    setIsFullscreen(true);
   }
 
   // 加载画册
@@ -419,23 +471,38 @@ function formatDate(ts: number) {
 
 /**
  * 全屏预览样式：
- *  - 触发方式：BookDetailPage 工具栏点击「全屏预览」→ requestFullscreen() 整个 .book-stage-wrap
- *  - 浏览器原生全屏会自动覆盖整个屏幕，但内部子元素仍按原 CSS 渲染。
- *    这里我们额外做两件事：
- *      1) 让 .book-stage-wrap 在全屏下铺满（width/height 100%、纯黑底色避免周边露白）
- *      2) BookFlip 内部 .bookflip-stage 的 max-w-3xl 在全屏下解除，让对开尽量撑大
- *  - 通过 :fullscreen 伪类 + .is-fullscreen 兜底两路触发，保证兼容性。
+ *  - 桌面 / 安卓 Chrome：调用浏览器 Fullscreen API（requestFullscreen），由 :fullscreen 伪类生效。
+ *  - iOS Safari：Element.requestFullscreen 是 undefined，无法走原生全屏；
+ *    走「CSS 伪全屏」回退——给 .book-stage-wrap 加 .is-fullscreen 类，用 position:fixed 把它抬到屏幕顶层。
+ *  - 共用部分：max-w-3xl 解除、缩略图条隐藏、页码反白，两种模式都生效。
  */
 const FULLSCREEN_CSS = `
 .book-stage-wrap { position: relative; }
-/* 全屏容器自身：占满屏幕、纯黑背景、内容上下居中、可纵向滚动以兜底 */
-.book-stage-wrap:fullscreen,
-.book-stage-wrap.is-fullscreen {
+/* 原生全屏（桌面 Chrome / 安卓 Chrome）：浏览器自动把元素提升到屏幕顶层，
+   我们只需要把它撑满 + 涂黑底色 */
+.book-stage-wrap:fullscreen {
   width: 100vw;
   height: 100vh;
   background: #000;
   padding: 0;
   overflow: auto;
+}
+/* iOS Safari 兜底的 CSS 伪全屏：
+   iOS 不支持 Element.requestFullscreen，所以我们用 position: fixed 把这个容器抬到屏幕顶层。
+   这里同时使用 100vh 和 100dvh：dvh 在支持的浏览器里会自动减去地址栏的高度，避免底部被 iOS UI 遮住。 */
+.book-stage-wrap.is-fullscreen:not(:fullscreen) {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background: #000;
+  padding: 0;
+  overflow: auto;
+  /* 防止 iOS 上滚动穿透 / 橡皮筋 */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 /* 注意：不要给 .book-stage-wrap 的直接子 div 强加 width/height/flex，
    因为 BookFlip 根节点内部是「主视图 + 页码 + 缩略图条」三段纵向堆叠，
