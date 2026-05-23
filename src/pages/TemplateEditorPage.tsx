@@ -39,6 +39,22 @@ import {
   type UserTemplate,
 } from '../userTemplates';
 import { useTemplateRegistry } from '../TemplateRegistry';
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // —————————— 选项常量 ——————————
 
@@ -112,6 +128,38 @@ const PHOTO_SHAPES: { key: PhotoShape; label: string }[] = [
   { key: 'hexagon', label: '六边形' },
 ];
 
+/** 边框线型选项（仅 rect / rounded 形状下生效） */
+const BORDER_STYLES: { key: NonNullable<OverlayPhoto['borderStyle']>; label: string }[] = [
+  { key: 'none', label: '无' },
+  { key: 'solid', label: '实线' },
+  { key: 'dashed', label: '虚线' },
+  { key: 'dotted', label: '点线' },
+  { key: 'double', label: '双线' },
+];
+
+/** 阴影选项 */
+const SHADOW_OPTIONS: { key: NonNullable<OverlayPhoto['shadow']>; label: string }[] = [
+  { key: 'none', label: '无阴影' },
+  { key: 'soft', label: '柔和' },
+  { key: 'strong', label: '强烈' },
+];
+
+/**
+ * 模板封面预设变体（与 BookEditor 的 COVER_VARIANT_OPTIONS 对齐）。
+ * undefined = 跟随当前模板风格。
+ */
+const COVER_VARIANTS: { value: string | undefined; label: string; hint: string }[] = [
+  { value: undefined, label: '跟随模板', hint: '使用当前模板的默认风格' },
+  { value: 'minimal', label: '极简杂志', hint: '大留白 + 黑红撞色 + 衬线字' },
+  { value: 'watercolor', label: '手写水彩', hint: '斜贴小标签 + 柔和手绘' },
+  { value: 'cartoon', label: '萌趣卡通', hint: '厚描边 + 糖果圆角' },
+  { value: 'vintage', label: '复古胶片', hint: '胶片条 + 米色贴纸' },
+  { value: 'festival-cn', label: '中国红', hint: '红框 + 竖排 + 印章' },
+  { value: 'festival-xmas', label: '圣诞雪花', hint: '雪花边 + 红绿撞色' },
+  { value: 'poster', label: '海报大字', hint: '超大标题 + 圆形小照片' },
+  { value: 'filmstrip', label: '胶片定格', hint: '齿孔胶片 + 出血大图' },
+];
+
 // —————————— 工具函数 ——————————
 
 function withAlpha(hex: string, alpha: number): string {
@@ -148,6 +196,7 @@ function makeDefaultPage(): TemplatePage {
   return {
     id: uid('p'),
     photoSlotCount: 1,
+    kind: 'free',
     overlays: [
       {
         id: uid('ov'),
@@ -176,6 +225,29 @@ function makeDefaultPage(): TemplatePage {
   };
 }
 
+/** 默认封面页（kind='cover'）：1 张占位图 + 跟随模板风格 */
+function makeCoverPage(): TemplatePage {
+  return {
+    id: uid('p'),
+    photoSlotCount: 1,
+    kind: 'cover',
+    coverVariant: undefined,
+    overlays: [
+      {
+        id: uid('ov'),
+        kind: 'photo',
+        x: 10,
+        y: 10,
+        w: 80,
+        h: 80,
+        photoId: '',
+        placeholder: true,
+        shape: 'rect',
+      },
+    ],
+  };
+}
+
 function defaultDraft(): UserTemplate {
   return {
     id: createUserTemplateId(),
@@ -197,7 +269,7 @@ function defaultDraft(): UserTemplate {
     decorations: ['🌸', '🍃', '✿'],
     defaultTitle: '宝贝的时光',
     defaultSubtitle: 'Sweet Moments',
-    pages: [makeDefaultPage()],
+    pages: [makeCoverPage(), makeDefaultPage()],
     isUser: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -206,6 +278,17 @@ function defaultDraft(): UserTemplate {
 
 /** 把 TemplatePage 转成 PageView 能渲染的 BookPage（free 版式 + overlays） */
 function pageToBookPage(tp: TemplatePage): BookPage {
+  // 封面预设页：渲染时直接走 PageView 的 cover 版式
+  if (tp.kind === 'cover') {
+    return {
+      id: tp.id,
+      layout: 'cover',
+      photoIds: [], // 由 CanvasArea 注入示例图
+      variant: tp.coverVariant,
+      title: '',
+      subtitle: '',
+    };
+  }
   return {
     id: tp.id,
     layout: 'free',
@@ -473,6 +556,54 @@ export function TemplateEditorPage() {
     setPageIdx(j);
   };
 
+  /** dnd-kit 拖拽结束后整体重排 */
+  const reorderPages = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    updatePages((all) => arrayMove(all, fromIdx, toIdx));
+    // 把当前选中页跟随移动；其它情况下相应调整索引以保持"用户视觉上选中的页"不变
+    setPageIdx((cur) => {
+      if (cur === fromIdx) return toIdx;
+      // 拖动其它页，但当前页位置可能被挤动
+      if (fromIdx < cur && toIdx >= cur) return cur - 1;
+      if (fromIdx > cur && toIdx <= cur) return cur + 1;
+      return cur;
+    });
+    setSelectedOverlayId(null);
+  };
+
+  /** 切换当前页类型：cover 预设 ↔ free 自由自定义 */
+  const setCurrentPageKind = (kind: 'cover' | 'free') => {
+    updatePages((all) =>
+      all.map((p, i) => {
+        if (i !== pageIdx) return p;
+        if ((p.kind ?? 'free') === kind) return p;
+        if (kind === 'cover') {
+          // 切到封面：保留 1 个图片占位 + coverVariant
+          const cv = makeCoverPage();
+          return {
+            ...cv,
+            id: p.id, // 保持原页 id 以避免选中态丢失
+          };
+        }
+        // 切到 free：用默认自由布局
+        const fp = makeDefaultPage();
+        return {
+          ...fp,
+          id: p.id,
+          kind: 'free',
+          coverVariant: undefined,
+        };
+      }),
+    );
+    setSelectedOverlayId(null);
+  };
+
+  const setCurrentCoverVariant = (variant: string | undefined) => {
+    updatePages((all) =>
+      all.map((p, i) => (i === pageIdx ? { ...p, coverVariant: variant } : p)),
+    );
+  };
+
   const handleSave = async () => {
     if (!draft.name.trim()) {
       alert('请先填写模板名称');
@@ -565,6 +696,7 @@ export function TemplateEditorPage() {
           onDuplicate={duplicatePage}
           onDelete={deletePage}
           onMove={movePage}
+          onReorder={reorderPages}
         />
 
         {/* —— 中：自由画布 —— */}
@@ -586,6 +718,8 @@ export function TemplateEditorPage() {
           onAddText={addTextOverlay}
           onPatchOverlay={patchOverlay}
           onRemoveOverlay={removeOverlay}
+          onSetPageKind={setCurrentPageKind}
+          onSetCoverVariant={setCurrentCoverVariant}
         />
       </div>
 
@@ -642,6 +776,7 @@ function PageListPanel({
   onDuplicate,
   onDelete,
   onMove,
+  onReorder,
 }: {
   draft: UserTemplate;
   pageIdx: number;
@@ -650,82 +785,52 @@ function PageListPanel({
   onDuplicate: (i: number) => void;
   onDelete: (i: number) => void;
   onMove: (i: number, delta: -1 | 1) => void;
+  onReorder: (fromIdx: number, toIdx: number) => void;
 }) {
   const pages = draft.pages ?? [];
+
+  // 8px 拖拽位移阈值，避免点击/上下按钮误触发拖拽
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 5 } }),
+  );
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const fromIdx = pages.findIndex((p) => p.id === active.id);
+    const toIdx = pages.findIndex((p) => p.id === over.id);
+    if (fromIdx < 0 || toIdx < 0) return;
+    onReorder(fromIdx, toIdx);
+  };
+
   return (
     <aside className="rounded-2xl bg-white border border-black/5 shadow-sm p-2 flex flex-col gap-2 self-start sticky top-4 max-h-[calc(100vh-32px)] overflow-y-auto">
-      <div className="px-2 py-1 text-[11px] text-neutral-500 font-medium">
-        页面（{pages.length}）
+      <div className="px-2 py-1 text-[11px] text-neutral-500 font-medium flex items-center justify-between">
+        <span>页面（{pages.length}）</span>
+        <span className="text-[10px] text-neutral-400">长按 ⋮⋮ 拖动排序</span>
       </div>
-      <div className="space-y-1.5">
-        {pages.map((p, i) => {
-          const active = i === pageIdx;
-          return (
-            <div
-              key={p.id}
-              onClick={() => onSelect(i)}
-              className={`group relative rounded-lg border cursor-pointer overflow-hidden transition ${
-                active
-                  ? 'border-neutral-900 ring-2 ring-neutral-900/15 bg-white'
-                  : 'border-neutral-200 hover:border-neutral-400 bg-neutral-50'
-              }`}
-            >
-              {/* 缩略图 */}
-              <PageThumbnail page={p} draft={draft} />
-              {/* 序号 + 操作 */}
-              <div className="px-2 py-1 flex items-center justify-between text-[10px] bg-white/80 border-t border-neutral-100">
-                <span className={`font-medium ${active ? 'text-neutral-900' : 'text-neutral-500'}`}>
-                  P{i + 1}
-                </span>
-                <div className="flex gap-0.5">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMove(i, -1);
-                    }}
-                    disabled={i === 0}
-                    className="px-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
-                    title="上移"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMove(i, 1);
-                    }}
-                    disabled={i === pages.length - 1}
-                    className="px-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
-                    title="下移"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDuplicate(i);
-                    }}
-                    className="px-1 text-neutral-500 hover:text-neutral-900"
-                    title="复制此页"
-                  >
-                    ⎘
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(i);
-                    }}
-                    className="px-1 text-neutral-500 hover:text-rose-600"
-                    title="删除此页"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={pages.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-1.5">
+            {pages.map((p, i) => (
+              <SortablePageItem
+                key={p.id}
+                page={p}
+                index={i}
+                total={pages.length}
+                active={i === pageIdx}
+                draft={draft}
+                onSelect={() => onSelect(i)}
+                onMoveUp={() => onMove(i, -1)}
+                onMoveDown={() => onMove(i, 1)}
+                onDuplicate={() => onDuplicate(i)}
+                onDelete={() => onDelete(i)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
       <button
         onClick={onAdd}
         className="mt-1 w-full py-2 rounded-lg border border-dashed border-neutral-300 text-[12px] text-neutral-600 hover:bg-neutral-50 hover:border-neutral-500"
@@ -736,10 +841,143 @@ function PageListPanel({
   );
 }
 
+/** 单个可拖拽页项 */
+function SortablePageItem({
+  page,
+  index,
+  total,
+  active,
+  draft,
+  onSelect,
+  onMoveUp,
+  onMoveDown,
+  onDuplicate,
+  onDelete,
+}: {
+  page: TemplatePage;
+  index: number;
+  total: number;
+  active: boolean;
+  draft: UserTemplate;
+  onSelect: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: page.id,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.55 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  const isCover = page.kind === 'cover';
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      onClick={onSelect}
+      className={`group relative rounded-lg border cursor-pointer overflow-hidden transition ${
+        active
+          ? 'border-neutral-900 ring-2 ring-neutral-900/15 bg-white'
+          : 'border-neutral-200 hover:border-neutral-400 bg-neutral-50'
+      }`}
+    >
+      {/* 拖拽 handle —— 只把 listeners 绑在它上面，避免影响整卡的点击 */}
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute left-1 top-1 z-10 w-5 h-5 rounded bg-white/80 border border-neutral-200 text-neutral-500 hover:text-neutral-900 hover:bg-white text-[10px] flex items-center justify-center cursor-grab active:cursor-grabbing"
+        title="拖动排序"
+      >
+        ⋮⋮
+      </button>
+      {isCover && (
+        <span className="absolute right-1 top-1 z-10 px-1.5 py-0.5 rounded bg-rose-500/90 text-white text-[9px] font-medium">
+          封面
+        </span>
+      )}
+      <PageThumbnail page={page} draft={draft} />
+      <div className="px-2 py-1 flex items-center justify-between text-[10px] bg-white/80 border-t border-neutral-100">
+        <span className={`font-medium ${active ? 'text-neutral-900' : 'text-neutral-500'}`}>
+          P{index + 1}
+        </span>
+        <div className="flex gap-0.5">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onMoveUp();
+            }}
+            disabled={index === 0}
+            className="px-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
+            title="上移"
+          >
+            ↑
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onMoveDown();
+            }}
+            disabled={index === total - 1}
+            className="px-1 text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
+            title="下移"
+          >
+            ↓
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicate();
+            }}
+            className="px-1 text-neutral-500 hover:text-neutral-900"
+            title="复制此页"
+          >
+            ⎘
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="px-1 text-neutral-500 hover:text-rose-600"
+            title="删除此页"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** 用 SVG 渲染页缩略图（按 overlays 的 % 坐标投到 60×80 上） */
 function PageThumbnail({ page, draft }: { page: TemplatePage; draft: UserTemplate }) {
   const W = 60;
   const H = 80;
+  // 封面页：画一个简化封面示意（一张大图 + 标题色块）
+  if (page.kind === 'cover') {
+    return (
+      <div
+        style={{
+          width: '100%',
+          aspectRatio: '3 / 4',
+          background: page.background ?? draft.colors.paper,
+        }}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%">
+          <rect x="6" y="8" width={W - 12} height={H - 30} fill="#D4D4D4" stroke="#A3A3A3" strokeWidth={0.5} rx={2} />
+          <rect x="10" y={H - 18} width={W - 20} height="3" fill={draft.colors.primary} />
+          <rect x="14" y={H - 11} width={W - 28} height="1.5" fill="#A3A3A3" />
+        </svg>
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -815,6 +1053,43 @@ function CanvasArea({
 
   if (!page) {
     return <div className="text-center text-neutral-500 py-20">没有页面</div>;
+  }
+
+  // —— 封面预设页：直接走 cover 版式，不开放 overlay 编辑 ——
+  if (page.kind === 'cover') {
+    const sample = SAMPLE_PHOTOS[0];
+    const bookPage: BookPage = {
+      id: page.id,
+      layout: 'cover',
+      photoIds: [sample.id],
+      variant: page.coverVariant,
+      title: draft.defaultTitle,
+      subtitle: draft.defaultSubtitle,
+    };
+    return (
+      <div className="flex flex-col items-center" style={{ background: draft.colors.bg }}>
+        <div
+          ref={wrapRef}
+          className="rounded-md overflow-hidden shadow-[0_20px_50px_-20px_rgba(0,0,0,0.35)] bg-white"
+          style={{
+            width: '100%',
+            maxWidth: 540,
+            aspectRatio: '3 / 4',
+          }}
+        >
+          <PageView
+            page={bookPage}
+            photos={[sample]}
+            template={draft}
+            babyName={draft.defaultTitle}
+            dateRange={draft.defaultSubtitle}
+          />
+        </div>
+        <p className="mt-3 text-[11px] text-neutral-500 text-center max-w-md">
+          封面预设页：在右侧选择喜欢的封面样式。如需自由摆放元素，可切换为「自由自定义」模式。
+        </p>
+      </div>
+    );
   }
 
   // 预览模式：把 placeholder 槽位临时绑到示例图，让用户看真实排版
@@ -898,6 +1173,8 @@ function RightPanel({
   onAddText,
   onPatchOverlay,
   onRemoveOverlay,
+  onSetPageKind,
+  onSetCoverVariant,
 }: {
   draft: UserTemplate;
   page: TemplatePage | undefined;
@@ -906,61 +1183,130 @@ function RightPanel({
   onAddText: (preset?: 'title' | 'subtitle' | 'caption') => void;
   onPatchOverlay: (id: string, patch: Partial<Overlay>) => void;
   onRemoveOverlay: (id: string) => void;
+  onSetPageKind: (kind: 'cover' | 'free') => void;
+  onSetCoverVariant: (variant: string | undefined) => void;
 }) {
+  const isCover = page?.kind === 'cover';
   return (
     <aside className="space-y-3 self-start sticky top-4 max-h-[calc(100vh-32px)] overflow-y-auto pr-1">
-      {/* 工具栏 */}
-      <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
-        <div className="text-[11px] text-neutral-500 mb-2 font-medium">添加元素</div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <ToolButton icon="🖼" label="图片框" onClick={onAddPhoto} />
-          <ToolButton icon="T" label="文字" onClick={() => onAddText()} />
-          <ToolButton icon="H1" label="标题" onClick={() => onAddText('title')} />
-          <ToolButton icon="H2" label="副标题" onClick={() => onAddText('subtitle')} />
-        </div>
-        <div className="mt-2 text-[10px] text-neutral-400 leading-relaxed">
-          图片框是"占位槽位"，用此模板创建画册时会按顺序填入用户上传的照片。
-        </div>
-        {page && (
-          <div className="mt-2 text-[11px] text-neutral-600 px-1">
-            当前页：{page.overlays.filter((o) => o.kind === 'photo').length} 个图片框 ·{' '}
-            {page.overlays.filter((o) => o.kind === 'text').length} 个文字
+      {/* 页类型切换 */}
+      {page && (
+        <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+          <div className="text-[11px] text-neutral-500 mb-2 font-medium">页类型</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => onSetPageKind('cover')}
+              className={`py-1.5 rounded-lg text-[11px] border transition ${
+                isCover
+                  ? 'border-rose-500 bg-rose-500 text-white'
+                  : 'border-neutral-200 hover:border-neutral-400 text-neutral-700'
+              }`}
+              title="使用预设封面样式（多选一）"
+            >
+              📕 封面预设
+            </button>
+            <button
+              onClick={() => onSetPageKind('free')}
+              className={`py-1.5 rounded-lg text-[11px] border transition ${
+                !isCover
+                  ? 'border-neutral-900 bg-neutral-900 text-white'
+                  : 'border-neutral-200 hover:border-neutral-400 text-neutral-700'
+              }`}
+              title="自由摆放图片框 / 文字"
+            >
+              ✏️ 自由自定义
+            </button>
           </div>
-        )}
-      </section>
-
-      {/* 属性面板 */}
-      <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
-        <div className="text-[11px] text-neutral-500 mb-2 font-medium">
-          {selectedOverlay
-            ? selectedOverlay.kind === 'photo'
-              ? '图片框属性'
-              : '文字属性'
-            : '元素属性'}
-        </div>
-        {!selectedOverlay ? (
-          <div className="text-[11px] text-neutral-400 py-4 text-center">
-            点击画布中的元素以编辑属性
+          <div className="mt-2 text-[10px] text-neutral-400 leading-relaxed">
+            {isCover
+              ? '封面预设：从下方多种封面样式中选一种，使用此模板时第 1 页将统一渲染。'
+              : '自由自定义：图片框 / 文字可任意拖拽、缩放、旋转。'}
           </div>
-        ) : selectedOverlay.kind === 'photo' ? (
-          <PhotoOverlayPanel
-            overlay={selectedOverlay}
-            draft={draft}
-            onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
-            onRemove={() => onRemoveOverlay(selectedOverlay.id)}
-          />
-        ) : (
-          <TextOverlayPanel
-            overlay={selectedOverlay}
-            draft={draft}
-            onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
-            onRemove={() => onRemoveOverlay(selectedOverlay.id)}
-          />
-        )}
-      </section>
+        </section>
+      )}
 
-      {/* 几何（通用） */}
-      {selectedOverlay && (
+      {/* 封面预设变体（仅 kind=cover 显示） */}
+      {isCover && (
+        <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+          <div className="text-[11px] text-neutral-500 mb-2 font-medium">封面样式</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {COVER_VARIANTS.map((v) => {
+              const active = (page?.coverVariant ?? undefined) === v.value;
+              return (
+                <button
+                  key={v.label}
+                  onClick={() => onSetCoverVariant(v.value)}
+                  title={v.hint}
+                  className={`py-2 px-1 rounded-lg text-[10px] border transition leading-tight ${
+                    active
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-700 ring-1 ring-rose-300'
+                      : 'border-neutral-200 hover:border-neutral-400 text-neutral-700'
+                  }`}
+                >
+                  {v.label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 工具栏（封面页隐藏） */}
+      {!isCover && (
+        <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+          <div className="text-[11px] text-neutral-500 mb-2 font-medium">添加元素</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <ToolButton icon="🖼" label="图片框" onClick={onAddPhoto} />
+            <ToolButton icon="T" label="文字" onClick={() => onAddText()} />
+            <ToolButton icon="H1" label="标题" onClick={() => onAddText('title')} />
+            <ToolButton icon="H2" label="副标题" onClick={() => onAddText('subtitle')} />
+          </div>
+          <div className="mt-2 text-[10px] text-neutral-400 leading-relaxed">
+            图片框是"占位槽位"，用此模板创建画册时会按顺序填入用户上传的照片。
+          </div>
+          {page && (
+            <div className="mt-2 text-[11px] text-neutral-600 px-1">
+              当前页：{page.overlays.filter((o) => o.kind === 'photo').length} 个图片框 ·{' '}
+              {page.overlays.filter((o) => o.kind === 'text').length} 个文字
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* 属性面板（封面页隐藏） */}
+      {!isCover && (
+        <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
+          <div className="text-[11px] text-neutral-500 mb-2 font-medium">
+            {selectedOverlay
+              ? selectedOverlay.kind === 'photo'
+                ? '图片框属性'
+                : '文字属性'
+              : '元素属性'}
+          </div>
+          {!selectedOverlay ? (
+            <div className="text-[11px] text-neutral-400 py-4 text-center">
+              点击画布中的元素以编辑属性
+            </div>
+          ) : selectedOverlay.kind === 'photo' ? (
+            <PhotoOverlayPanel
+              overlay={selectedOverlay}
+              draft={draft}
+              onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
+              onRemove={() => onRemoveOverlay(selectedOverlay.id)}
+            />
+          ) : (
+            <TextOverlayPanel
+              overlay={selectedOverlay}
+              draft={draft}
+              onPatch={(patch) => onPatchOverlay(selectedOverlay.id, patch)}
+              onRemove={() => onRemoveOverlay(selectedOverlay.id)}
+            />
+          )}
+        </section>
+      )}
+
+      {/* 几何（通用，封面页不显示） */}
+      {!isCover && selectedOverlay && (
         <section className="rounded-2xl bg-white border border-black/5 shadow-sm p-3">
           <div className="text-[11px] text-neutral-500 mb-2 font-medium">位置 & 旋转</div>
           <GeometryPanel
@@ -1004,13 +1350,21 @@ function PhotoOverlayPanel({
   onPatch: (patch: Partial<Overlay>) => void;
   onRemove: () => void;
 }) {
+  const shape = overlay.shape ?? 'rect';
+  const isRectish = shape === 'rect' || shape === 'rounded';
+  const borderStyle = overlay.borderStyle ?? 'solid';
+  const borderWidth = overlay.borderWidth ?? 0;
+  const radius = overlay.borderRadius ?? (shape === 'rounded' ? 18 : 0);
+  const shadow = overlay.shadow ?? 'none';
+
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-3">
+      {/* 形状 */}
       <div>
         <div className="text-[10px] text-neutral-500 mb-1">相框形状</div>
         <div className="grid grid-cols-3 gap-1">
           {PHOTO_SHAPES.map((s) => {
-            const active = (overlay.shape ?? 'rect') === s.key;
+            const active = shape === s.key;
             return (
               <button
                 key={s.key}
@@ -1028,25 +1382,99 @@ function PhotoOverlayPanel({
         </div>
       </div>
 
+      {/* 边框线型（仅 rect/rounded 生效；异形时禁用并提示） */}
       <div>
-        <div className="text-[10px] text-neutral-500 mb-1">边框</div>
-        <div className="flex items-center gap-1.5">
+        <div className="text-[10px] text-neutral-500 mb-1 flex items-center justify-between">
+          <span>边框线型</span>
+          {!isRectish && <span className="text-[9px] text-neutral-400">异形仅支持单色描边</span>}
+        </div>
+        <div className="grid grid-cols-5 gap-1">
+          {BORDER_STYLES.map((s) => {
+            const active = borderStyle === s.key;
+            const disabled = !isRectish && s.key !== 'solid' && s.key !== 'none';
+            return (
+              <button
+                key={s.key}
+                disabled={disabled}
+                onClick={() => onPatch({ borderStyle: s.key })}
+                className={`py-1 rounded text-[10px] border transition disabled:opacity-30 ${
+                  active
+                    ? 'border-neutral-900 bg-neutral-900 text-white'
+                    : 'border-neutral-200 bg-white hover:border-neutral-400'
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 边框颜色 + 粗细 */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">边框颜色</div>
           <input
             type="color"
-            value={normalizeHex(overlay.borderColor ?? draft.colors.paper)}
+            value={normalizeHex(overlay.borderColor ?? '#FFFFFF')}
             onChange={(e) => onPatch({ borderColor: e.target.value })}
-            className="w-7 h-7 rounded border border-neutral-200"
+            className="w-full h-7 rounded border border-neutral-200"
             style={{ padding: 0 }}
           />
+        </div>
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1">粗细 (px)</div>
           <input
             type="number"
             min={0}
             max={20}
-            value={overlay.borderWidth ?? 4}
+            value={borderWidth}
             onChange={(e) => onPatch({ borderWidth: Math.max(0, Number(e.target.value)) })}
-            className="te-input flex-1"
+            className="te-input"
             placeholder="px"
           />
+        </div>
+      </div>
+
+      {/* 内圆角（仅 rect/rounded 生效） */}
+      {isRectish && (
+        <div>
+          <div className="text-[10px] text-neutral-500 mb-1 flex items-center justify-between">
+            <span>圆角 {Math.round(radius)}%</span>
+            <span className="text-[9px] text-neutral-400">0 = 直角，50 = 极圆</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={50}
+            step={1}
+            value={radius}
+            onChange={(e) => onPatch({ borderRadius: Number(e.target.value) })}
+            className="w-full"
+          />
+        </div>
+      )}
+
+      {/* 阴影 */}
+      <div>
+        <div className="text-[10px] text-neutral-500 mb-1">阴影</div>
+        <div className="grid grid-cols-3 gap-1">
+          {SHADOW_OPTIONS.map((s) => {
+            const active = shadow === s.key;
+            return (
+              <button
+                key={s.key}
+                onClick={() => onPatch({ shadow: s.key })}
+                className={`py-1 rounded text-[10px] border transition ${
+                  active
+                    ? 'border-neutral-900 bg-neutral-900 text-white'
+                    : 'border-neutral-200 bg-white hover:border-neutral-400'
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 

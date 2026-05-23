@@ -4583,10 +4583,45 @@ function OverlayPhotoBody({
     );
   }
   // 用一个临时的"形状/颜色"上下文，让 PhotoFrame 走叠层指定的形状
+  const shape = overlay.shape ?? 'rect';
+  const isRectish = shape === 'rect' || shape === 'rounded';
+  const borderStyle = overlay.borderStyle ?? 'solid';
+  const borderWidth = overlay.borderWidth ?? 0;
+  const showBorder =
+    isRectish && borderStyle !== 'none' && borderWidth > 0 && !!overlay.borderColor;
+  // borderRadius：rect 默认 0；rounded 默认 18%；用户显式给出则覆盖
+  const radiusPct =
+    overlay.borderRadius != null
+      ? overlay.borderRadius
+      : shape === 'rounded'
+        ? 18
+        : 0;
+  const shadowCss =
+    overlay.shadow === 'soft'
+      ? '0 4px 14px rgba(0,0,0,0.15)'
+      : overlay.shadow === 'strong'
+        ? '0 10px 28px rgba(0,0,0,0.32)'
+        : undefined;
+
   return (
     <PhotoShapeContext.Provider value={() => overlay.shape ?? 'rect'}>
       <PhotoFrameColorContext.Provider value={overlay.borderColor ?? photoFrameColor ?? null}>
-        <div className="w-full h-full" style={{ pointerEvents: 'none' }}>
+        <div
+          className="w-full h-full"
+          style={{
+            pointerEvents: 'none',
+            // rect/rounded 时把圆角、边框、阴影做在外壳上；异形场景由 ShapeMask 内部处理描边
+            borderRadius: isRectish ? `${radiusPct}%` : undefined,
+            border:
+              showBorder && overlay.borderColor
+                ? `${borderWidth}px ${borderStyle} ${overlay.borderColor}`
+                : undefined,
+            boxShadow: shadowCss,
+            overflow: isRectish ? 'hidden' : 'visible',
+            boxSizing: 'border-box',
+            background: showBorder ? overlay.borderColor ?? undefined : undefined,
+          }}
+        >
           <PhotoFrame photo={photo} template={template} className="w-full h-full" />
         </div>
       </PhotoFrameColorContext.Provider>

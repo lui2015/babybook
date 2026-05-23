@@ -136,6 +136,20 @@ export interface TemplatePage {
   overlays: Overlay[];
   /** 该页特定的背景颜色覆盖（可选；不填用模板 paper 色） */
   background?: string | null;
+  /**
+   * 页类型：
+   *   - 'free' （默认 / 缺省）：自由布局，按 overlays 渲染。
+   *   - 'cover'：封面页。该页"无 overlays 自由元素"，统一走 PageView 内置 CoverLayout
+   *     渲染，配合 coverVariant 选用某一种封面预设样式。
+   *     模板编辑器里第 1 页可在「封面预设」与「自由自定义」间切换。
+   */
+  kind?: 'free' | 'cover';
+  /**
+   * 仅当 kind === 'cover' 时使用：选中的封面变体（与 BookEditor 中
+   * COVER_VARIANT_OPTIONS 对齐：undefined=跟随模板 / 'minimal' / 'watercolor' /
+   * 'cartoon' / 'vintage' / 'festival-cn' / 'festival-xmas' / 'poster' / 'filmstrip'）
+   */
+  coverVariant?: string;
 }
 
 /**
@@ -222,6 +236,27 @@ export interface OverlayPhoto extends OverlayBase {
   borderColor?: string | null;
   /** 边框宽度（px），不填用 4px */
   borderWidth?: number;
+  /**
+   * 边框线型（仅 rect / rounded 形状下生效；异形会忽略）。
+   * - 'solid'（默认）：实线
+   * - 'dashed'：虚线
+   * - 'dotted'：点线
+   * - 'double'：双线
+   * - 'none'：无边框（即便 borderWidth>0 也不画）
+   */
+  borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
+  /**
+   * 内圆角半径（百分比，0 ~ 50；仅 rect / rounded 生效）。
+   * 不填或 shape='rounded' 时维持原默认 18%；shape='rect' 默认 0。
+   */
+  borderRadius?: number;
+  /**
+   * 阴影开关 / 强度。
+   * - undefined / 'none'：无阴影
+   * - 'soft'：柔和投影
+   * - 'strong'：明显投影
+   */
+  shadow?: 'none' | 'soft' | 'strong';
   /**
    * 占位标记：仅出现在「模板编辑器」中。
    * - true：该 OverlayPhoto 是模板里设计的"图片槽位"，photoId 还未绑定真实照片，

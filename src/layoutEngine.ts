@@ -218,6 +218,32 @@ function instantiateFromTemplatePages(
 
   let slotCursor = 0;
   return tplPages.map((tp, pageIdx) => {
+    // —— 封面页：直接走 PageView 内置的 cover 版式 ——
+    // 取该页第一张 OverlayPhoto 槽位绑定的照片作为封面图；若该页没有图片槽位，则退回到全局封面照
+    if (tp.kind === 'cover') {
+      const firstPhotoOv = tp.overlays.find((o) => o.kind === 'photo') as
+        | OverlayPhoto
+        | undefined;
+      let coverPhotoId: string;
+      if (firstPhotoOv) {
+        coverPhotoId = photoIdsBySlot[slotCursor] ?? cover.id;
+        slotCursor += 1;
+        // 跳过该页其它图片槽位（封面版式只用 1 张）
+        const restPhotoCount = tp.overlays.filter((o) => o.kind === 'photo').length - 1;
+        slotCursor += Math.max(0, restPhotoCount);
+      } else {
+        coverPhotoId = cover.id;
+      }
+      return {
+        id: uid(),
+        layout: 'cover',
+        photoIds: [coverPhotoId],
+        variant: tp.coverVariant,
+        title: tpl.defaultTitle ?? (options.babyName ? `${options.babyName}的画册` : '我的画册'),
+        subtitle: options.dateRange || tpl.defaultSubtitle || '',
+      };
+    }
+
     const pagePhotoIds: string[] = [];
     const overlays: Overlay[] = tp.overlays.map((ov) => {
       if (ov.kind !== 'photo') return ov;
