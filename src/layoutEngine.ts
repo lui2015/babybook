@@ -1,5 +1,6 @@
 import type {
   BookPage,
+  CustomVariant,
   Overlay,
   OverlayPhoto,
   Photo,
@@ -274,3 +275,281 @@ function instantiateFromTemplatePages(
     };
   });
 }
+
+/* ============================================================
+ *  convertPageToFree
+ *
+ *  把一页从「骨架版式（single/double/triple/grid…）」转成
+ *  「自由摆放（free + OverlayPhoto[]）」，每张照片成为一个可拖动 / 缩放 /
+ *  旋转的相框。原 layout 记录到 prevLayout 字段以便"还原默认排版"。
+ *
+ *  - 几何按版式推导成接近原视觉的 % 坐标（左上角 x/y + 宽 w/高 h）；
+ *  - 形状沿用 page.photoShapes（不再使用 photoFocus，因 OverlayPhoto 用裁剪 cover 自适应）；
+ *  - 文字 caption / overlays（OverlayText）保留，不变；
+ *  - 已是 free 的页直接返回原页（幂等）。
+ * ============================================================ */
+export function convertPageToFree(page: BookPage): BookPage {
+  if (page.layout === 'free') return page;
+
+  // 不可转换的非"图片版式"（cover/text/ending）保持原样，由 UI 不暴露按钮即可
+  if (page.layout === 'cover' || page.layout === 'text' || page.layout === 'ending') {
+    return page;
+  }
+
+  const prevOverlays: Overlay[] = page.overlays ?? [];
+  // 保留原 OverlayText（避免丢用户已写的自由文字）
+  const keptTextOverlays = prevOverlays.filter((o) => o.kind === 'text');
+
+  const photoIds = page.photoIds ?? [];
+  const slots = layoutSlotGeometry(page.layout, photoIds.length);
+
+  const photoOverlays: OverlayPhoto[] = photoIds.slice(0, slots.length).map((pid, i) => {
+    const g = slots[i];
+    const shape = page.photoShapes?.[i];
+    return {
+      id: uid(),
+      kind: 'photo',
+      photoId: pid,
+      x: g.x,
+      y: g.y,
+      w: g.w,
+      h: g.h,
+      rotation: 0,
+      shape,
+      // 默认柔和阴影 + 适度白边，转成自由摆放后看起来仍像"相框"
+      borderColor: '#ffffff',
+      borderWidth: 6,
+      borderStyle: 'solid',
+      borderRadius: shape === 'rounded' ? 12 : 0,
+      shadow: 'soft',
+      placeholder: false,
+    } as OverlayPhoto;
+  });
+
+  return {
+    ...page,
+    layout: 'free',
+    prevLayout: page.layout,
+    overlays: [...photoOverlays, ...keptTextOverlays],
+    // 自由布局下 photoFocus 不再生效（OverlayPhoto 自带 cover 裁剪）
+    photoFocus: undefined,
+  };
+}
+
+/**
+ * 根据骨架版式推导每个 photo slot 的近似几何（%）。
+ * 数值不必与原版式像素级一致 —— 只要切换后照片不堆叠、初始观感合理即可，
+ * 后续用户会自由拖动调整。
+ */
+function layoutSlotGeometry(
+  layout: PageLayoutType,
+  count: number,
+): Array<{ x: number; y: number; w: number; h: number }> {
+  const n = Math.max(0, count);
+  if (n === 0) return [];
+
+  switch (layout) {
+    case 'single':
+    case 'single-portrait':
+      // 单图：略带留白居中
+      return [{ x: 8, y: 10, w: 84, h: 70 }];
+
+    case 'double': {
+      // 双图：上下错落叠加（接近常见杂志风），第二张稍往右下偏移
+      const w = 58;
+      const h = 50;
+      return [
+        { x: 6, y: 8, w, h },
+        { x: 36, y: 38, w, h },
+      ].slice(0, n);
+    }
+
+    case 'triple': {
+      // 三图：左 1 大 + 右上下 2 小
+      const slots = [
+        { x: 6, y: 10, w: 50, h: 70 },
+        { x: 60, y: 10, w: 34, h: 33 },
+        { x: 60, y: 47, w: 34, h: 33 },
+      ];
+      return slots.slice(0, n);
+    }
+
+    case 'grid4': {
+      // 2x2 网格
+      const w = 40;
+      const h = 36;
+      const xs = [8, 52];
+      const ys = [10, 50];
+      const out = [] as Array<{ x: number; y: number; w: number; h: number }>;
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 2; c++) {
+          out.push({ x: xs[c], y: ys[r], w, h });
+        }
+      }
+      return out.slice(0, n);
+    }
+
+    case 'grid5': {
+      // 上 2 下 3
+      const slots = [
+        { x: 8, y: 8, w: 40, h: 38 },
+        { x: 52, y: 8, w: 40, h: 38 },
+        { x: 6, y: 52, w: 28, h: 32 },
+        { x: 36, y: 52, w: 28, h: 32 },
+        { x: 66, y: 52, w: 28, h: 32 },
+      ];
+      return slots.slice(0, n);
+    }
+
+    case 'grid6': {
+      // 3x2
+      const w = 27;
+      const h = 36;
+      const xs = [7, 36.5, 66];
+      const ys = [10, 52];
+      const out = [] as Array<{ x: number; y: number; w: number; h: number }>;
+      for (let r = 0; r < 2; r++) {
+        for (let c = 0; c < 3; c++) {
+          out.push({ x: xs[c], y: ys[r], w, h });
+        }
+      }
+      return out.slice(0, n);
+    }
+
+    default: {
+      // 兜底：整页平均切成 n 张横排
+      const margin = 6;
+      const totalW = 100 - margin * 2;
+      const gap = 2;
+      const w = (totalW - gap * (n - 1)) / n;
+      const h = 60;
+      return Array.from({ length: n }, (_, i) => ({
+        x: margin + i * (w + gap),
+        y: 20,
+        w,
+        h,
+      }));
+    }
+  }
+}
+
+/**
+ * 把已转成 free 的页"还原"回原骨架版式（依赖 prevLayout）。
+ * - 若 prevLayout 缺失或当前不是 free，原样返回；
+ * - 还原时丢弃 photo overlays，但保留用户在 free 期间编辑的 OverlayText（写回 overlays）。
+ */
+export function restorePageFromFree(page: BookPage): BookPage {
+  if (page.layout !== 'free' || !page.prevLayout) return page;
+  const keptTextOverlays = (page.overlays ?? []).filter((o) => o.kind === 'text');
+  return {
+    ...page,
+    layout: page.prevLayout,
+    prevLayout: undefined,
+    overlays: keptTextOverlays.length ? keptTextOverlays : undefined,
+  };
+}
+
+/* ============================================================
+ *  自定义版式变体（CustomVariant）工具
+ *
+ *  使用流程：
+ *    1) 用户在某页（非 free）开启「自由摆放」→ 该页变 layout='free' + OverlayPhoto[]，
+ *       prevLayout 记下原 layout（如 'triple'）。
+ *    2) 用户拖框调整后，点「另存为我的变体」→ extractCustomVariantFromPage(page, label)
+ *       生成 CustomVariant，slots 以原 layout 作为绑定 layout（即 prevLayout）。
+ *    3) 之后任意同 layout 的页都可在「版式变体」面板里点选这个自定义变体 →
+ *       applyCustomVariantToPage(page, cv) 把页面切到 free + 套用 slots，
+ *       并记下 customVariantId 用于 UI 高亮。
+ * ============================================================ */
+
+/**
+ * 从一页（必须是 free 且 prevLayout 是图片版式）抽取出 CustomVariant。
+ * 返回 null 表示不可抽取（不是 free 模式 / 缺 prevLayout / 没有 OverlayPhoto）。
+ */
+export function extractCustomVariantFromPage(
+  page: BookPage,
+  label: string,
+): CustomVariant | null {
+  if (page.layout !== 'free') return null;
+  // 必须能"绑回"一个图片版式，否则它就只是任意 free 页，不属于"某 layout 的变体"
+  const targetLayout: PageLayoutType | undefined = page.prevLayout;
+  if (!targetLayout || targetLayout === 'free' || targetLayout === 'cover'
+    || targetLayout === 'text' || targetLayout === 'ending') {
+    return null;
+  }
+
+  const photoOverlays = (page.overlays ?? []).filter(
+    (o): o is OverlayPhoto => o.kind === 'photo',
+  );
+  if (photoOverlays.length === 0) return null;
+
+  return {
+    id: uid(),
+    label: label.trim() || '我的变体',
+    layout: targetLayout,
+    slots: photoOverlays.map((o) => ({
+      x: o.x,
+      y: o.y,
+      w: o.w,
+      h: o.h,
+      rotation: o.rotation,
+      shape: o.shape,
+      borderColor: o.borderColor,
+      borderWidth: o.borderWidth,
+      borderStyle: o.borderStyle,
+      borderRadius: o.borderRadius,
+      shadow: o.shadow,
+    })),
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * 把页面套用到指定 CustomVariant：layout=free + 按 slots 顺序生成 OverlayPhoto。
+ *
+ *  - 若当前页已是 free，先丢掉旧的 photo overlays（保留 OverlayText）；
+ *  - prevLayout 设为 cv.layout，以便用户后续能"还原"回该骨架；
+ *  - photoIds 数量不足 cv.slots 时只渲染前 N 个槽位；
+ *    photoIds 多于 slots 时多余照片暂时隐藏（用户可继续手动添加 / 改回内置变体）。
+ */
+export function applyCustomVariantToPage(
+  page: BookPage,
+  cv: CustomVariant,
+): BookPage {
+  const photoIds = page.photoIds ?? [];
+  const keptText = (page.overlays ?? []).filter((o) => o.kind === 'text');
+
+  const photoOverlays: OverlayPhoto[] = photoIds
+    .slice(0, cv.slots.length)
+    .map((pid, i) => {
+      const s = cv.slots[i];
+      return {
+        id: uid(),
+        kind: 'photo',
+        photoId: pid,
+        x: s.x,
+        y: s.y,
+        w: s.w,
+        h: s.h,
+        rotation: s.rotation ?? 0,
+        shape: s.shape,
+        borderColor: s.borderColor,
+        borderWidth: s.borderWidth,
+        borderStyle: s.borderStyle,
+        borderRadius: s.borderRadius,
+        shadow: s.shadow,
+        placeholder: false,
+      } as OverlayPhoto;
+    });
+
+  return {
+    ...page,
+    layout: 'free',
+    prevLayout: cv.layout,
+    customVariantId: cv.id,
+    variant: undefined,
+    photoFocus: undefined,
+    overlays: [...photoOverlays, ...keptText],
+  };
+}
+

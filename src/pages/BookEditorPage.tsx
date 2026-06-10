@@ -7,7 +7,8 @@ import { BottomSheet } from '../components/BottomSheet';
 import { applyBookTheme } from '../bookTheme';
 import { VARIANTS, defaultVariantId } from '../layoutVariants';
 import { fileToPhoto } from '../imageUtils';
-import type { Book, BookPage, Overlay, OverlayPhoto, OverlayText, PageLayoutType, Photo, PhotoFocus, PhotoShape, Template } from '../types';
+import { convertPageToFree, restorePageFromFree, applyCustomVariantToPage, extractCustomVariantFromPage } from '../layoutEngine';
+import type { Book, BookPage, CustomVariant, Overlay, OverlayPhoto, OverlayText, PageLayoutType, Photo, PhotoFocus, PhotoShape, Template } from '../types';
 
 /** 将数值约束到 [min, max] 区间 */
 function clamp(value: number, min: number, max: number): number {
@@ -183,8 +184,43 @@ export function BookEditorPage() {
     });
   }
 
-  /** 切换当前页版式（会自动调整 photoIds） */
+  /** 切换当前页版式（会自动调整 photoIds）
+   *
+   *  特殊处理：
+   *  - 切到 'free'：把当前页转成自由摆放（每张相片成为可拖动的 OverlayPhoto），
+   *    同时把原 layout 记到 prevLayout 用于"还原"。
+   *  - 当前是 'free' 切回其它版式：先 restore 回原骨架（丢弃 photo overlays），
+   *    再走标准的 photoIds 调整逻辑。
+   */
   function changeLayout(layout: PageLayoutType) {
+    // 自由摆放：直接整页替换
+    if (layout === 'free') {
+      if (currentPage.layout === 'free') return; // 幂等
+      const next = convertPageToFree(currentPage);
+      updateBook((prev) => {
+        const nextPages = prev.pages.map((p, i) => (i === index ? next : p));
+        return { ...prev, pages: nextPages, updatedAt: Date.now() };
+      });
+      // 切到自由布局后清空原"调焦点"选中态，避免下层提示语错乱
+      setSelectedPhotoId(null);
+      return;
+    }
+
+    // 当前是 free，先还原回 prevLayout 的骨架
+    if (currentPage.layout === 'free') {
+      const restored = restorePageFromFree(currentPage);
+      // 若用户选择的目标 layout 与还原后的 prevLayout 不同，再走一次标准 changeLayout
+      const required = layoutPhotoCount(layout);
+      const { photoIds } = adjustPhotoIds(restored.photoIds, required, book!);
+      updateBook((prev) => {
+        const nextPages = prev.pages.map((p, i) =>
+          i === index ? { ...restored, layout, photoIds, variant: undefined } : p,
+        );
+        return { ...prev, pages: nextPages, updatedAt: Date.now() };
+      });
+      return;
+    }
+
     const required = layoutPhotoCount(layout);
     const { photoIds } = adjustPhotoIds(currentPage.photoIds, required, book!);
     patchCurrentPage({ layout, photoIds, variant: undefined });
@@ -192,7 +228,94 @@ export function BookEditorPage() {
 
   /** 切换当前页变体 */
   function changeVariant(variant: string | undefined) {
-    patchCurrentPage({ variant });
+    // 切到任意内置 variant 时清掉 customVariantId（互斥），避免 UI 双高亮
+    patchCurrentPage({ variant, customVariantId: undefined });
+  }
+
+  /** 选用一个自定义变体：把当前页转成 free + 套用 slots 几何 */
+  function applyCustomVariant(cvId: string) {
+    if (!book) return;
+    const cv = (book.customVariants ?? []).find((x) => x.id === cvId);
+    if (!cv) return;
+    const next = applyCustomVariantToPage(currentPage, cv);
+    updateBook((prev) => {
+      const nextPages = prev.pages.map((p, i) => (i === index ? next : p));
+      return { ...prev, pages: nextPages, updatedAt: Date.now() };
+    });
+    setSelectedPhotoId(null);
+  }
+
+  /** 把当前 free 页的相片几何"另存为我的变体" */
+  function saveCurrentAsCustomVariant() {
+    if (!book) return;
+    if (currentPage.layout !== 'free') {
+      window.alert('请先在「自由摆放」中调好相片位置，再保存为变体。');
+      return;
+    }
+    if (!currentPage.prevLayout) {
+      window.alert('当前页不是从某个版式转过来的自由布局，无法绑定到具体版式。');
+      return;
+    }
+    const label = window.prompt('给你的变体起个名字（最多 12 字）：', '我的变体');
+    if (label == null) return;
+    const trimmed = label.trim().slice(0, 12);
+    const cv = extractCustomVariantFromPage(currentPage, trimmed || '我的变体');
+    if (!cv) {
+      window.alert('当前页没有相片，无法保存为变体。');
+      return;
+    }
+    updateBook((prev) => {
+      const nextCVs = [...(prev.customVariants ?? []), cv];
+      const nextPages = prev.pages.map((p, i) =>
+        i === index ? { ...p, customVariantId: cv.id } : p,
+      );
+      return { ...prev, customVariants: nextCVs, pages: nextPages, updatedAt: Date.now() };
+    });
+  }
+
+  /** 重命名自定义变体 */
+  function renameCustomVariant(cvId: string) {
+    if (!book) return;
+    const cv = (book.customVariants ?? []).find((x) => x.id === cvId);
+    if (!cv) return;
+    const next = window.prompt('重命名（最多 12 字）：', cv.label);
+    if (next == null) return;
+    const label = next.trim().slice(0, 12);
+    if (!label || label === cv.label) return;
+    updateBook((prev) => ({
+      ...prev,
+      customVariants: (prev.customVariants ?? []).map((x) =>
+        x.id === cvId ? { ...x, label } : x,
+      ),
+      updatedAt: Date.now(),
+    }));
+  }
+
+  /** 删除自定义变体；正在使用它的页会回退到默认骨架版式 */
+  function deleteCustomVariant(cvId: string) {
+    if (!book) return;
+    const cv = (book.customVariants ?? []).find((x) => x.id === cvId);
+    if (!cv) return;
+    if (!window.confirm(`确定删除变体「${cv.label}」？正在使用它的页面会还原为默认排版。`)) {
+      return;
+    }
+    updateBook((prev) => ({
+      ...prev,
+      customVariants: (prev.customVariants ?? []).filter((x) => x.id !== cvId),
+      pages: prev.pages.map((p) => {
+        if (p.customVariantId !== cvId) return p;
+        // 把使用此变体的页还原回 prevLayout（与"还原排版"一致），photoIds 保持不变
+        const target = p.prevLayout ?? cv.layout;
+        return {
+          ...p,
+          layout: target,
+          prevLayout: undefined,
+          customVariantId: undefined,
+          overlays: (p.overlays ?? []).filter((o) => o.kind === 'text'),
+        };
+      }),
+      updatedAt: Date.now(),
+    }));
   }
 
   /** 把第 slot 张照片替换为 photoId */
@@ -631,6 +754,10 @@ export function BookEditorPage() {
         handlePickFromLibrary={handlePickFromLibrary}
         handleDeletePhoto={handleDeletePhoto}
         openAddPhotos={openAddPhotos}
+        applyCustomVariant={applyCustomVariant}
+        saveCurrentAsCustomVariant={saveCurrentAsCustomVariant}
+        renameCustomVariant={renameCustomVariant}
+        deleteCustomVariant={deleteCustomVariant}
         dragFromIdx={dragFromIdx}
         setDragFromIdx={setDragFromIdx}
         dragOverIdx={dragOverIdx}
@@ -916,7 +1043,9 @@ export function BookEditorPage() {
           )}
           {!selectedPhotoId && (
             <div className="mt-3 text-[11px] text-neutral-500 bg-white/80 backdrop-blur rounded-full px-3 py-1 border border-neutral-200">
-              提示：点击预览里的照片选中后，可拖动调整画面位置，或在右侧「排版」中替换/换形状
+              {currentPage.layout === 'free'
+                ? '提示：本页为自由摆放 · 点中相片可拖动 / 四角缩放 / 顶部旋转'
+                : '提示：点击预览里的照片选中后，可拖动调整画面位置，或在右侧「排版」中替换/换形状'}
             </div>
           )}
           {uploading && (
@@ -992,6 +1121,10 @@ export function BookEditorPage() {
                 onAddOverlay={addOverlay}
                 onPatchOverlay={patchOverlay}
                 onRemoveOverlay={removeOverlay}
+                onApplyCustomVariant={applyCustomVariant}
+                onSaveAsCustomVariant={saveCurrentAsCustomVariant}
+                onRenameCustomVariant={renameCustomVariant}
+                onDeleteCustomVariant={deleteCustomVariant}
               />
             )}
             {tab === 'theme' && (
@@ -1109,6 +1242,10 @@ function MobileEditorLayout(props: {
   handlePickFromLibrary: (photoId: string) => void;
   handleDeletePhoto: (photoId: string) => void;
   openAddPhotos: () => void;
+  applyCustomVariant: (cvId: string) => void;
+  saveCurrentAsCustomVariant: () => void;
+  renameCustomVariant: (cvId: string) => void;
+  deleteCustomVariant: (cvId: string) => void;
   dragFromIdx: number | null;
   setDragFromIdx: (v: number | null) => void;
   dragOverIdx: number | null;
@@ -1160,6 +1297,10 @@ function MobileEditorLayout(props: {
     handlePickFromLibrary,
     handleDeletePhoto,
     openAddPhotos,
+    applyCustomVariant,
+    saveCurrentAsCustomVariant,
+    renameCustomVariant,
+    deleteCustomVariant,
     dragFromIdx,
     setDragFromIdx,
     dragOverIdx,
@@ -1560,6 +1701,10 @@ function MobileEditorLayout(props: {
             onAddOverlay={addOverlay}
             onPatchOverlay={patchOverlay}
             onRemoveOverlay={removeOverlay}
+            onApplyCustomVariant={applyCustomVariant}
+            onSaveAsCustomVariant={saveCurrentAsCustomVariant}
+            onRenameCustomVariant={renameCustomVariant}
+            onDeleteCustomVariant={deleteCustomVariant}
           />
         </div>
       </BottomSheet>
@@ -2093,6 +2238,10 @@ function LayoutTab({
   onAddOverlay,
   onPatchOverlay,
   onRemoveOverlay,
+  onApplyCustomVariant,
+  onSaveAsCustomVariant,
+  onRenameCustomVariant,
+  onDeleteCustomVariant,
 }: {
   book: Book;
   page: BookPage;
@@ -2113,10 +2262,21 @@ function LayoutTab({
   onAddOverlay: (kind: 'text' | 'photo') => void;
   onPatchOverlay: (id: string, patch: Partial<Overlay>) => void;
   onRemoveOverlay: (id: string) => void;
+  onApplyCustomVariant: (cvId: string) => void;
+  onSaveAsCustomVariant: () => void;
+  onRenameCustomVariant: (cvId: string) => void;
+  onDeleteCustomVariant: (cvId: string) => void;
 }) {
-  // 当前 layout 对应的 variant 清单（仅多图版式有）
-  const variantKey = variantKeyOf(page.layout);
+  // 当前 layout 对应的 variant 清单（仅多图版式有）。
+  // 自由布局（free）模式下，回退用 prevLayout 计算 —— 这样用户在 free 里也能切换/保存变体。
+  const effectiveLayoutForVariant: PageLayoutType =
+    page.layout === 'free' ? (page.prevLayout ?? page.layout) : page.layout;
+  const variantKey = variantKeyOf(effectiveLayoutForVariant);
   const variantList = variantKey ? VARIANTS[variantKey] : null;
+  // 当前页所属 layout 对应的自定义变体清单（按 createdAt 升序展示）
+  const customVariantList: CustomVariant[] = variantKey
+    ? (book.customVariants ?? []).filter((cv) => cv.layout === effectiveLayoutForVariant)
+    : [];
 
   // 当前页所需照片数
   const need = layoutPhotoCount(page.layout);
@@ -2137,6 +2297,48 @@ function LayoutTab({
 
   return (
     <div className="space-y-6">
+      {/* 自由摆放开关 —— 把当前页转成"每张相片可独立拖动 / 缩放 / 旋转"的自由布局 */}
+      {page.layout !== 'cover' && page.layout !== 'text' && page.layout !== 'ending' && (
+        <div
+          className={`rounded-lg border px-3 py-2.5 flex items-center gap-3 ${
+            page.layout === 'free'
+              ? 'border-rose bg-rose/5'
+              : 'border-neutral-200 bg-neutral-50'
+          }`}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="text-[12px] font-medium text-neutral-800">
+              {page.layout === 'free' ? '自由摆放（已开启）' : '自由摆放'}
+            </div>
+            <div className="text-[10px] text-neutral-500 mt-0.5 leading-snug">
+              {page.layout === 'free'
+                ? '点中相片可拖动、四角缩放、顶部旋转。还原后恢复骨架版式。'
+                : '把每张相片变成可独立拖动 / 缩放 / 旋转的相框。'}
+            </div>
+          </div>
+          {page.layout === 'free' ? (
+            <button
+              onClick={() => {
+                const prev = page.prevLayout ?? 'single';
+                onChangeLayout(prev);
+              }}
+              className="shrink-0 text-[11px] px-2.5 py-1.5 rounded-full border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100"
+              title="切回原骨架版式（保留 photoIds，丢弃自由摆放后的相框位置）"
+            >
+              还原排版
+            </button>
+          ) : (
+            <button
+              onClick={() => onChangeLayout('free')}
+              className="shrink-0 text-[11px] px-2.5 py-1.5 rounded-full bg-rose text-white hover:brightness-105"
+            >
+              开启
+            </button>
+          )}
+        </div>
+      )}
+
+      {page.layout !== 'free' && (
       <Section title="页面版式">
         <div className="grid grid-cols-3 gap-2">
           {LAYOUT_OPTIONS.map((opt) => {
@@ -2162,18 +2364,29 @@ function LayoutTab({
           })}
         </div>
       </Section>
+      )}
 
       {variantList && (
-        <Section title="版式变体" hint="同一版式的不同摆法">
+        <Section title="版式变体" hint="同一版式的不同摆法 / 我的自定义">
+          {/* 内置变体 */}
           <div className="grid grid-cols-3 gap-2">
             {variantList.map((v) => {
+              // free 模式下没有内置 variant 高亮（因为已切换到自定义/自由）
               const currentVariant =
-                page.variant ?? defaultVariantId(variantKey!);
+                page.layout === 'free' || page.customVariantId
+                  ? null
+                  : (page.variant ?? defaultVariantId(variantKey!));
               const active = v.id === currentVariant;
               return (
                 <button
                   key={v.id}
-                  onClick={() => onChangeVariant(v.id)}
+                  onClick={() => {
+                    // 若当前是 free / 自定义变体，先回到 prevLayout 的骨架再选内置变体
+                    if (page.layout === 'free' && page.prevLayout) {
+                      onChangeLayout(page.prevLayout);
+                    }
+                    onChangeVariant(v.id);
+                  }}
                   className={`px-2 py-3 rounded-lg border-2 text-left transition ${
                     active
                       ? 'border-rose bg-rose/5'
@@ -2190,6 +2403,90 @@ function LayoutTab({
                 </button>
               );
             })}
+          </div>
+
+          {/* 我的自定义变体 */}
+          {customVariantList.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[11px] text-neutral-500 mb-1.5 px-0.5">我的自定义</div>
+              <div className="grid grid-cols-3 gap-2">
+                {customVariantList.map((cv) => {
+                  const active = page.customVariantId === cv.id;
+                  return (
+                    <div
+                      key={cv.id}
+                      className={`relative rounded-lg border-2 overflow-hidden transition ${
+                        active
+                          ? 'border-rose bg-rose/5'
+                          : 'border-neutral-200 hover:border-neutral-400 bg-white'
+                      }`}
+                    >
+                      <button
+                        onClick={() => onApplyCustomVariant(cv.id)}
+                        className="w-full block text-left"
+                        title={`点击应用「${cv.label}」`}
+                      >
+                        <div className="aspect-[3/4] bg-neutral-50 relative">
+                          <CustomVariantThumb cv={cv} />
+                        </div>
+                        <div
+                          className={`px-1.5 py-1 text-[11px] truncate ${
+                            active ? 'text-rose font-medium' : 'text-neutral-700'
+                          }`}
+                        >
+                          {cv.label}
+                        </div>
+                      </button>
+                      {/* 操作菜单：重命名 / 删除（小尺寸图标按钮，避免遮挡缩略图） */}
+                      <div className="absolute top-1 right-1 flex gap-0.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRenameCustomVariant(cv.id);
+                          }}
+                          className="w-5 h-5 rounded-full bg-white/90 border border-neutral-200 text-[10px] leading-none flex items-center justify-center text-neutral-600 hover:bg-white"
+                          title="重命名"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteCustomVariant(cv.id);
+                          }}
+                          className="w-5 h-5 rounded-full bg-white/90 border border-neutral-200 text-[10px] leading-none flex items-center justify-center text-rose hover:bg-white"
+                          title="删除"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 另存为按钮：只在 free 模式（且 prevLayout 是图片版式）下可用 */}
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={onSaveAsCustomVariant}
+              disabled={page.layout !== 'free'}
+              className={`flex-1 px-3 py-2 rounded-lg border text-[11px] transition ${
+                page.layout === 'free'
+                  ? 'border-rose bg-rose text-white hover:brightness-105'
+                  : 'border-neutral-200 bg-neutral-50 text-neutral-400 cursor-not-allowed'
+              }`}
+              title={
+                page.layout === 'free'
+                  ? '把当前相片摆位另存为我的变体（同 layout 复用）'
+                  : '请先开启「自由摆放」并调好相片位置'
+              }
+            >
+              {page.layout === 'free'
+                ? '＋ 把当前摆位另存为我的变体'
+                : '提示：开启「自由摆放」后可另存为变体'}
+            </button>
           </div>
         </Section>
       )}
@@ -3252,6 +3549,38 @@ function newPageId(): string {
     return crypto.randomUUID();
   }
   return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 自定义变体缩略图：基于 slots 的 % 几何画一组小灰块，
+ * 让用户一眼分辨"我有哪些版式变体"。
+ *
+ * 容器是父级 aspect-[3/4] 的 div，所以这里直接铺满 + 用绝对定位渲染各 slot。
+ */
+function CustomVariantThumb({ cv }: { cv: CustomVariant }) {
+  return (
+    <div className="absolute inset-0">
+      {cv.slots.map((s, i) => (
+        <div
+          key={i}
+          className="absolute bg-neutral-300/80 border border-neutral-400/30"
+          style={{
+            left: `${s.x}%`,
+            top: `${s.y}%`,
+            width: `${s.w}%`,
+            height: `${s.h}%`,
+            transform: s.rotation ? `rotate(${s.rotation}deg)` : undefined,
+            borderRadius:
+              s.shape === 'circle' || s.shape === 'rounded'
+                ? '20%'
+                : s.shape === 'rect'
+                  ? '2px'
+                  : '4px',
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 function variantKeyOf(layout: PageLayoutType): keyof typeof VARIANTS | null {

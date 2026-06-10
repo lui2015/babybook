@@ -188,6 +188,12 @@ export interface BookPage {
    */
   variant?: string;
   /**
+   * 选中的「自定义版式变体」id（指向 Book.customVariants[i].id）。
+   * 与 variant 互斥使用：选中自定义变体时，本页会被转成 layout='free' + overlays 渲染，
+   * 同时记下该 id 用于 UI 高亮当前选中。
+   */
+  customVariantId?: string;
+  /**
    * 每个 slot 的相框形状（与 photoIds 按索引对齐）。
    * undefined 或缺省项表示使用该版式的默认形状（通常是 'rect'）。
    * 非矩形形状会强制 1:1 比例以避免变形。
@@ -206,6 +212,11 @@ export interface BookPage {
    * 渲染顺序按数组顺序，越后越靠上。
    */
   overlays?: Overlay[];
+  /**
+   * 自由布局（layout='free'）下记忆"转换前的原版式"，
+   * 用户点击"还原默认排版"时可以切回。仅 free 时使用。
+   */
+  prevLayout?: PageLayoutType;
 }
 
 /** 自由叠层：照片画框 / 自定义文字 */
@@ -320,6 +331,51 @@ export interface Book {
   photos: Photo[];
   /** 编辑器里的主题自定义，可选 */
   theme?: BookThemeOverride;
+  /**
+   * 用户自定义版式变体清单。
+   * - 通过「自由摆放」调整好相片几何后「另存为我的变体」生成；
+   * - 仅作用于其声明的 layout（double/triple/grid…）；
+   * - 选用后等价于把该页转成 free 布局 + 套用 slots 几何（PageView 走 free 渲染路径）。
+   */
+  customVariants?: CustomVariant[];
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * 用户自定义的版式变体。
+ *
+ * 与内置 VariantDef 的差别：
+ *  - 内置变体的几何由 PageView 中 *Variant 组件硬编码（受 layout 限定）。
+ *  - 自定义变体的几何由 slots 直接给出（% 坐标），选用时把页面切到 layout='free'
+ *    并按 slots 顺序生成 OverlayPhoto，保证不破坏现有 free 渲染路径。
+ */
+export interface CustomVariant {
+  /** 稳定 id，写入 BookPage.customVariantId */
+  id: string;
+  /** 用户起的名字（展示在版式变体卡片上） */
+  label: string;
+  /**
+   * 适用的图片版式（只在同一 layout 的「版式变体」面板里展示）。
+   * 'single' / 'single-portrait' 也允许 —— 单图变体可记录用户偏移的"画面取景"。
+   */
+  layout: PageLayoutType;
+  /**
+   * 每个 slot 的几何（左上角 + 宽高，% 坐标），
+   * 顺序对应 BookPage.photoIds。
+   */
+  slots: Array<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    rotation?: number;
+    shape?: PhotoShape;
+    borderColor?: string | null;
+    borderWidth?: number;
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
+    borderRadius?: number;
+    shadow?: 'none' | 'soft' | 'strong';
+  }>;
+  createdAt: number;
 }
